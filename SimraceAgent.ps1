@@ -265,6 +265,12 @@ function Invoke-Request($Request) {
             Restart-Pc
             return @{ ok = $true; reboot = $true }
         }
+        'shutdown' {
+            Test-Token $Request
+            Write-Log 'Выключение'
+            [void](Start-Process -FilePath 'shutdown.exe' -ArgumentList '/s /t 3 /f' -WindowStyle Hidden)
+            return @{ ok = $true; reboot = $true }
+        }
         'open' {
             Test-Token $Request
             $name = [string]$Request.file

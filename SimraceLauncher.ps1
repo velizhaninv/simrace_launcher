@@ -1930,11 +1930,12 @@ function Update-TimerDisplay {
 function Update-TimerLayout {
     $idle = $script:TimerState -eq 'idle'
     $SessionStart.Visibility = $(if ($idle) { 'Visible' } else { 'Collapsed' })
-    $SessionStrip.Visibility = $(if ($idle) { 'Collapsed' } else { 'Visible' })
+    $SessionFields.Visibility = $(if ($idle) { 'Collapsed' } else { 'Visible' })
     $RowsPanel.IsEnabled = -not $idle
     $RowsPanel.Opacity = $(if ($idle) { 0.25 } else { 1 })
     Update-ScrollArrows
-    $BtnPause.Content = $(if ($script:TimerState -eq 'paused') { 'Продолжить' } else { 'Пауза' })
+    $BtnPause.Content = $(if ($script:TimerState -eq 'paused') { [string][char]0x25B6 } else { 'II' })
+    $BtnPause.ToolTip = $(if ($script:TimerState -eq 'paused') { 'Продолжить' } else { 'Пауза' })
     Update-TimerDisplay
     if ($idle) { [void]$BtnStartSession.Focus() }
 }
@@ -2960,6 +2961,7 @@ function Invoke-AdminPending {
         'uwf-on' { @{ action = 'uwf'; token = $script:AdminToken; enable = $true } }
         'uwf-off' { @{ action = 'uwf'; token = $script:AdminToken; enable = $false } }
         'reboot' { @{ action = 'reboot'; token = $script:AdminToken } }
+        'shutdown' { @{ action = 'shutdown'; token = $script:AdminToken } }
     }
     $response = Invoke-Agent $request 3000
     if (-not $response -or -not $response.ok) {
@@ -2968,7 +2970,8 @@ function Invoke-AdminPending {
     }
     $script:AdminToken = $null
     $AdminPanel.Visibility = 'Collapsed'
-    if ($response.reboot) { Show-Waiting 'Компьютер перезагружается' 'Подожди немного.' '' }
+    if ($script:AdminPending -eq 'shutdown') { Show-Waiting 'Компьютер выключается' 'Подожди немного.' '' }
+    elseif ($response.reboot) { Show-Waiting 'Компьютер перезагружается' 'Подожди немного.' '' }
     else { $script:AgentPollUntil = (Get-Date).AddMinutes(3) }
 }
 
@@ -3381,37 +3384,39 @@ function Submit-Decision([bool]$Lock) {
         </Viewbox>
 
         <StackPanel x:Name="ToolsPanel" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-          <StackPanel x:Name="HeaderTools" Orientation="Horizontal" Margin="0,0,10,0"/>
-          <TextBlock x:Name="TxtComputer" FontSize="22" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,24,0"/>
-          <TextBlock x:Name="TxtClock" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <StackPanel x:Name="HeaderTools" Orientation="Horizontal"/>
         </StackPanel>
       </Grid>
 
-      <!-- Сеанс: справа сверху, где удобно смотреть администратору -->
+      <!-- Второй ряд: связь и язык, затем всё о текущем сеансе -->
       <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
-      <Border x:Name="SessionStrip" Margin="0,0,10,0" Visibility="Collapsed" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="22,6,8,6">
-        <StackPanel Orientation="Horizontal">
-          <TextBlock Text="Сеанс" FontSize="16" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-          <TextBlock x:Name="TxtStripTime" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,20,0"/>
-          <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="0,0,20,0"/>
-          <TextBlock Text="Старт" FontSize="16" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-          <TextBlock x:Name="TxtStripStart" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,20,0"/>
-          <Button x:Name="BtnPause" Content="Пауза" Style="{StaticResource ToolButton}" Margin="0,0,8,0"/>
-          <Button x:Name="BtnEndSession" Content="Завершить" Style="{StaticResource ToolButton}"/>
-        </StackPanel>
-      </Border>
-
-        <!-- Статус-бар: язык, сеть, VPN и локальная сеть -->
-        <Border x:Name="StatusStrip" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="6">
-          <StackPanel Orientation="Horizontal">
+        <Border x:Name="StatusStrip" Margin="0,0,10,0" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="6">
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <Button x:Name="BtnStatusLang" Style="{StaticResource StatusButton}" FontSize="18" MinWidth="50" ToolTip="Язык ввода, нажми, чтобы сменить"/>
-            <Border x:Name="NetBox" Padding="8,0" VerticalAlignment="Center" Background="Transparent">
+            <Border x:Name="NetBox" Visibility="Collapsed" Padding="8,0" VerticalAlignment="Center" Background="Transparent">
               <Canvas Width="24" Height="24">
                 <Path x:Name="IconNet" Stroke="#6C6F73" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M4,4 L20,20 M20,4 L4,20"/>
               </Canvas>
             </Border>
             <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="6,0"/>
             <StackPanel x:Name="StatusLinks" Orientation="Horizontal"/>
+          </StackPanel>
+        </Border>
+
+        <Border x:Name="SessionStrip" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="22,6,22,6">
+          <StackPanel Orientation="Horizontal">
+            <StackPanel x:Name="SessionFields" Orientation="Horizontal" Visibility="Collapsed">
+              <TextBlock Text="Сеанс" FontSize="16" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+              <TextBlock x:Name="TxtStripTime" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,20,0"/>
+              <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="0,0,20,0"/>
+              <TextBlock Text="Старт" FontSize="16" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+              <TextBlock x:Name="TxtStripStart" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,20,0"/>
+              <Button x:Name="BtnPause" Content="II" MinWidth="58" Style="{StaticResource ToolButton}" Margin="0,0,8,0" ToolTip="Пауза"/>
+              <Button x:Name="BtnEndSession" Content="Завершить" Style="{StaticResource ToolButton}" Margin="0,0,20,0"/>
+              <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="0,0,20,0"/>
+            </StackPanel>
+            <TextBlock x:Name="TxtComputer" FontSize="20" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,16,0"/>
+            <TextBlock x:Name="TxtClock" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
           </StackPanel>
         </Border>
       </StackPanel>
@@ -3640,14 +3645,41 @@ function Submit-Decision([bool]$Lock) {
         </StackPanel>
 
         <StackPanel x:Name="AdminMenu" Visibility="Collapsed">
-          <UniformGrid Columns="2" Margin="-6">
-            <Button x:Name="BtnAdminUpdate" Content="Обновить лаунчер" Style="{StaticResource ActionButton}" Margin="6"/>
+          <TextBlock Text="ЗАЩИТА" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
+          <UniformGrid Columns="2" Margin="-6,0,-6,0">
             <Button x:Name="BtnAdminUwf" Content="Разблокировать ПК" Style="{StaticResource ActionButton}" Margin="6"/>
-            <Button x:Name="BtnAdminSettings" Content="Настройки лаунчера" Style="{StaticResource ActionButton}" Margin="6"/>
             <Button x:Name="BtnAdminUwfPanel" Content="Настройки UWF" Style="{StaticResource ActionButton}" Margin="6"/>
-            <Button x:Name="BtnMinimizeLauncher" Content="Свернуть лаунчер" Style="{StaticResource ActionButton}" Margin="6"/>
-            <Button x:Name="BtnRestartLauncher" Content="Перезапустить лаунчер" Style="{StaticResource ActionButton}" Margin="6"/>
-            <Button x:Name="BtnExit" Content="Закрыть лаунчер" Style="{StaticResource ActionButton}" Margin="6"/>
+          </UniformGrid>
+
+          <TextBlock Text="ЛАУНЧЕР" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,18,0,8"/>
+          <Grid Margin="-6,0,-6,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="BtnAdminSettings" Grid.Column="0" Content="Настройки лаунчера" Style="{StaticResource ActionButton}" Margin="6"/>
+            <Button x:Name="BtnMinimizeLauncher" Grid.Column="1" Style="{StaticResource ActionButton}" Margin="6" ToolTip="Свернуть лаунчер">
+              <Canvas Width="24" Height="24"><Path Data="M5,19 H19" Stroke="White" StrokeThickness="2.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas>
+            </Button>
+            <Button x:Name="BtnAdminUpdate" Grid.Column="2" Style="{StaticResource ActionButton}" Margin="6" ToolTip="Обновить лаунчер">
+              <Canvas Width="24" Height="24">
+                <Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                <Path Data="M5,20 H19" Stroke="White" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+              </Canvas>
+            </Button>
+            <Button x:Name="BtnExit" Grid.Column="3" Style="{StaticResource ActionButton}" Margin="6" ToolTip="Закрыть лаунчер">
+              <Canvas Width="24" Height="24">
+                <Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/>
+                <Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+              </Canvas>
+            </Button>
+          </Grid>
+
+          <TextBlock Text="КОМПЬЮТЕР" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,18,0,8"/>
+          <UniformGrid Columns="2" Margin="-6,0,-6,0">
+            <Button x:Name="BtnAdminShutdown" Content="Выключить ПК" Style="{StaticResource ActionButton}" Margin="6"/>
             <Button x:Name="BtnAdminReboot" Content="Перезагрузить ПК" Style="{StaticResource ActionButton}" Margin="6"/>
           </UniformGrid>
           <TextBlock x:Name="TxtAdminNote" FontSize="16" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,22,0,0"/>
@@ -3857,7 +3889,7 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'BtnRestartLauncher', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'SessionFields', 'BtnAdminShutdown', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
@@ -3984,17 +4016,17 @@ try {
     New-ToolButton 'Панель администратора' 'gear' $null { Show-AdminPanel } -IconOnly
     $gear = $HeaderTools.Children[$HeaderTools.Children.Count - 1]
     $HeaderTools.Children.Remove($gear)
-    $gear.Margin = New-Object System.Windows.Thickness(20, 0, 0, 0)
+    $gear.Margin = New-Object System.Windows.Thickness(10, 0, 0, 0)
     [void]$ToolsPanel.Children.Add($gear)
 
     $BtnAdminLogin.Add_Click({ Submit-AdminLogin })
     $BtnAdminUpdate.Add_Click({ Request-AdminUpdate })
     $BtnAdminUwf.Add_Click({ Request-AdminUwf })
+    $BtnAdminShutdown.Add_Click({ Show-AdminConfirm 'shutdown' 'Выключить ПК' 'Компьютер выключится. Включить его обратно можно только кнопкой на корпусе.' 'Выключить' })
     $BtnAdminReboot.Add_Click({ Show-AdminConfirm 'reboot' 'Перезагрузить ПК' 'Компьютер перезагрузится.' 'Перезагрузить' })
     $BtnAdminSettings.Add_Click({ Open-AdminWindow 'LauncherSettings.ps1' 'Настройки лаунчера SIMRACE' })
     $BtnAdminUwfPanel.Add_Click({ Open-AdminWindow 'UwfPanel.ps1' 'Защита UWF' })
     $BtnMinimizeLauncher.Add_Click({ Enter-ServiceMode })
-    $BtnRestartLauncher.Add_Click({ Close-Launcher 2 })
     $BtnExit.Add_Click({ Close-Launcher 0 })
     $BtnAdminClose.Add_Click({ Hide-AdminPanel })
     $BtnConfirmOk.Add_Click({ Invoke-AdminPending })
