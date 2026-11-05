@@ -1,0 +1,275 @@
+{
+  "adminUser": "",
+  "launchTimeoutSeconds": 180,
+  "exitGraceSeconds": 2,
+  "steamAccounts": {
+    "default": {
+      "acc": "",
+      "assetto-corsa": "",
+      "ams2": "",
+      "ets2": "",
+      "beamng": "",
+      "city-car-driving-2": "",
+      "f1-25": "",
+      "wreckfest-2": "",
+      "dirt-rally-2": "",
+      "le-mans-ultimate": ""
+    }
+  },
+  "apps": [
+    {
+      "id": "beamng",
+      "name": "BeamNG.drive",
+      "steamAppId": "284160",
+      "shortcut": [
+        "*BeamMP*",
+        "*BeamNG*"
+      ],
+      "watch": [
+        "BeamMP-Launcher",
+        "BeamNG.drive.x64"
+      ],
+      "category": "fun"
+    },
+    {
+      "id": "ets2",
+      "name": "Euro Truck Simulator 2",
+      "steamAppId": "227300",
+      "shortcut": [
+        "*Euro Truck*",
+        "ETS2*"
+      ],
+      "category": "fun"
+    },
+    {
+      "id": "city-car-driving-2",
+      "name": "City Car Driving 2.0",
+      "steamAppId": "2327720",
+      "shortcut": [
+        "*City Car Driving*",
+        "CCD*"
+      ],
+      "category": "fun"
+    },
+    {
+      "id": "wreckfest-2",
+      "name": "Wreckfest 2",
+      "steamAppId": "1203190",
+      "shortcut": [
+        "*Wreckfest*"
+      ],
+      "category": "fun"
+    },
+    {
+      "id": "assetto-corsa",
+      "name": "Assetto Corsa",
+      "steamAppId": "244210",
+      "shortcut": [
+        "*Content Manager*",
+        "*ContentManager*"
+      ],
+      "paths": [
+        "{steam:244210}\\*Content*Manager*.exe"
+      ],
+      "watch": [
+        "Content Manager",
+        "acs"
+      ],
+      "requireShortcut": true,
+      "hostProcess": [
+        "Content Manager"
+      ],
+      "category": "racing"
+    },
+    {
+      "id": "acc",
+      "name": "Assetto Corsa Competizione",
+      "steamAppId": "805550",
+      "shortcut": [
+        "*Competizione*",
+        "ACC",
+        "ACC *"
+      ],
+      "category": "racing"
+    },
+    {
+      "id": "ams2",
+      "name": "Automobilista 2",
+      "steamAppId": "1066890",
+      "shortcut": [
+        "*Automobilista*",
+        "AMS2*"
+      ],
+      "category": "racing"
+    },
+    {
+      "id": "dirt-rally-2",
+      "name": "DiRT Rally 2.0",
+      "steamAppId": "690790",
+      "shortcut": [
+        "*DiRT Rally 2*",
+        "*Dirt Rally*"
+      ],
+      "category": "racing"
+    },
+    {
+      "id": "f1-25",
+      "name": "F1 25",
+      "steamAppId": "3059520",
+      "shortcut": [
+        "*F1*25*",
+        "F1 *",
+        "F1"
+      ],
+      "category": "pro"
+    },
+    {
+      "id": "le-mans-ultimate",
+      "name": "Le Mans Ultimate",
+      "steamAppId": "2399420",
+      "shortcut": [
+        "*Le Mans*",
+        "LMU*"
+      ],
+      "category": "pro"
+    },
+    {
+      "id": "iracing",
+      "name": "iRacing",
+      "coverSteamAppId": "266410",
+      "shortcut": [
+        "*iRacing*"
+      ],
+      "paths": [
+        "%ProgramFiles(x86)%\\iRacing\\ui\\iRacingUI.exe"
+      ],
+      "watch": [
+        "iRacingUI",
+        "iRacingSim64DX11"
+      ],
+      "hostProcess": [
+        "iRacingUI"
+      ],
+      "category": "pro"
+    }
+  ],
+  "utilities": [
+    {
+      "id": "mumble",
+      "name": "Голосовой чат",
+      "icon": "headphones",
+      "autostart": false,
+      "shortcut": [
+        "*Mumble*"
+      ],
+      "paths": [
+        "%ProgramFiles%\\Mumble\\client\\mumble.exe",
+        "%ProgramFiles%\\Mumble\\mumble.exe",
+        "%ProgramFiles(x86)%\\Mumble\\mumble.exe"
+      ],
+      "watch": [
+        "mumble"
+      ],
+      "gapAfter": 30
+    },
+    {
+      "id": "edge",
+      "name": "Браузер",
+      "icon": "globe",
+      "autostart": false,
+      "args": "--inprivate",
+      "paths": [
+        "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
+        "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe"
+      ],
+      "watch": [
+        "msedge"
+      ]
+    },
+    {
+      "id": "pit-house",
+      "name": "Pit House",
+      "icon": "wheel",
+      "autostart": false,
+      "shortcut": [
+        "*Pit*House*"
+      ],
+      "paths": [
+        "%ProgramFiles%\\MOZA*\\*Pit*House*.exe",
+        "%ProgramFiles(x86)%\\MOZA*\\*Pit*House*.exe"
+      ]
+    },
+    {
+      "id": "karing",
+      "name": "VPN",
+      "title": "Karing",
+      "icon": "shield",
+      "place": "status",
+      "autostart": false,
+      "shortcut": [
+        "*karing*"
+      ],
+      "paths": [
+        "%ProgramFiles%\\karing\\karing.exe",
+        "%LOCALAPPDATA%\\Programs\\karing\\karing.exe",
+        "%LOCALAPPDATA%\\karing\\karing.exe"
+      ],
+      "watch": [
+        "karing"
+      ]
+    },
+    {
+      "id": "radmin",
+      "name": "LAN",
+      "title": "Radmin VPN, локальная сеть",
+      "icon": "lan",
+      "place": "status",
+      "autostart": false,
+      "shortcut": [
+        "*Radmin*"
+      ],
+      "paths": [
+        "%ProgramFiles(x86)%\\Radmin VPN\\RvRvpnGui.exe"
+      ],
+      "watch": [
+        "RvRvpnGui"
+      ]
+    }
+  ],
+  "guestUser": "",
+  "requireSession": true,
+  "dashText": "READY TO RACE",
+  "devices": [
+    {
+      "name": "BASE",
+      "match": "VID_346E"
+    },
+    {
+      "name": "PEDALS",
+      "match": "VID_346E"
+    }
+  ],
+  "categories": [
+    {
+      "id": "fun",
+      "name": "FUN",
+      "note": ""
+    },
+    {
+      "id": "racing",
+      "name": "RACING",
+      "note": ""
+    },
+    {
+      "id": "pro",
+      "name": "PRO",
+      "note": "обратиться к администратору",
+      "notice": "Обратитесь к администратору"
+    }
+  ],
+  "layoutVersion": 3,
+  "deviceCheckSeconds": 2,
+  "forceFullscreen": true,
+  "minTileWidth": 220,
+  "askSteamAccount": true
+}
