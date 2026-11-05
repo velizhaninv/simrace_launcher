@@ -271,5 +271,12 @@
   "deviceCheckSeconds": 2,
   "forceFullscreen": true,
   "minTileWidth": 220,
-  "askSteamAccount": true
+  "askSteamAccount": true,
+  "showAxes": true,
+  "axes": {
+    "wheel": "0:X",
+    "throttle": "0:Y",
+    "brake": "0:Z",
+    "clutch": "0:R"
+  }
 }

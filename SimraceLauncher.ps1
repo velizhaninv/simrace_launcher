@@ -518,6 +518,73 @@ public static class SimraceNative
         }, IntPtr.Zero);
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct JOYCAPS
+    {
+        public ushort wMid, wPid;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szPname;
+        public uint xMin, xMax, yMin, yMax, zMin, zMax, numButtons, periodMin, periodMax, rMin, rMax, uMin, uMax, vMin, vMax, caps, maxAxes, numAxes, maxButtons;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szRegKey;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szOEMVxD;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOYINFOEX
+    {
+        public uint size, flags, x, y, z, r, u, v, buttons, buttonNumber, pov, reserved1, reserved2;
+    }
+    [DllImport("winmm.dll")]
+    private static extern uint joyGetNumDevs();
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode, EntryPoint = "joyGetDevCapsW")]
+    private static extern uint joyGetDevCaps(UIntPtr id, ref JOYCAPS caps, uint size);
+    [DllImport("winmm.dll")]
+    private static extern uint joyGetPosEx(uint id, ref JOYINFOEX info);
+
+    // Номера подключённых устройств производителя. VID лежит в поле wMid.
+    public static int[] FindJoysticks(int vendor)
+    {
+        System.Collections.Generic.List<int> found = new System.Collections.Generic.List<int>();
+        uint count = joyGetNumDevs();
+        for (uint id = 0; id < count && id < 32; id++)
+        {
+            JOYCAPS caps = new JOYCAPS();
+            if (joyGetDevCaps(new UIntPtr(id), ref caps, (uint)Marshal.SizeOf(typeof(JOYCAPS))) != 0) continue;
+            JOYINFOEX info = new JOYINFOEX();
+            info.size = (uint)Marshal.SizeOf(typeof(JOYINFOEX));
+            info.flags = 0xFF;
+            if (joyGetPosEx(id, ref info) != 0) continue;     // записи в реестре без подключённого устройства
+            if (caps.wMid == vendor) found.Add((int)id);
+        }
+        return found.ToArray();
+    }
+
+    // Все подключённые игровые устройства для журнала
+    public static string DescribeJoysticks()
+    {
+        StringBuilder text = new StringBuilder();
+        uint count = joyGetNumDevs();
+        for (uint id = 0; id < count && id < 32; id++)
+        {
+            JOYCAPS caps = new JOYCAPS();
+            if (joyGetDevCaps(new UIntPtr(id), ref caps, (uint)Marshal.SizeOf(typeof(JOYCAPS))) != 0) continue;
+            JOYINFOEX info = new JOYINFOEX();
+            info.size = (uint)Marshal.SizeOf(typeof(JOYINFOEX));
+            info.flags = 0xFF;
+            if (joyGetPosEx(id, ref info) != 0) continue;
+            text.AppendFormat("#{0} {1:X4}:{2:X4} осей {3}; ", id, caps.wMid, caps.wPid, caps.numAxes);
+        }
+        return text.ToString();
+    }
+
+    // Значения осей X, Y, Z, R, U, V от 0 до 65535. null: устройство не отвечает.
+    public static int[] ReadJoystick(int id)
+    {
+        JOYINFOEX info = new JOYINFOEX();
+        info.size = (uint)Marshal.SizeOf(typeof(JOYINFOEX));
+        info.flags = 0xFF;
+        if (joyGetPosEx((uint)id, ref info) != 0) return null;
+        return new int[] { (int)info.x, (int)info.y, (int)info.z, (int)info.r, (int)info.u, (int)info.v };
+    }
+
     // Окно службы открывается за лаунчером, Windows не даёт ему выйти вперёд самому
     public static bool ActivateByTitle(string title)
     {
@@ -1829,7 +1896,91 @@ function Update-Proportions {
     $TxtSelected.FontSize = $(if ($wide) { 42 } else { 34 })
     # На узком экране у кнопок остаются только значки
     foreach ($label in $script:ToolLabels) { $label.Visibility = $(if ($wide) { 'Visible' } else { 'Collapsed' }) }
+    # На узком экране мини-дашборду нет места рядом с адресами
+    $AxesCard.Visibility = $(if ($wide -and $script:Config.showAxes -ne $false) { 'Visible' } else { 'Collapsed' })
     Update-FeatureWidth
+}
+
+# ---------- Оси руля и педалей ----------
+
+# Привязка из apps.json: "0:X" значит устройство MOZA номер 0, ось X.
+function Initialize-Axes {
+    $script:AxisMap = @{}
+    foreach ($name in 'wheel', 'throttle', 'brake', 'clutch') {
+        $match = [regex]::Match([string]$script:Config.axes.$name, '^(\d+):([XYZRUVxyzruv])$')
+        if ($match.Success) { $script:AxisMap[$name] = @([int]$match.Groups[1].Value, 'XYZRUV'.IndexOf($match.Groups[2].Value.ToUpperInvariant())) }
+    }
+    try { Write-Log "Игровые устройства: $([SimraceNative]::DescribeJoysticks())" }
+    catch { Write-Log "Игровые устройства не прочитаны: $_" }
+}
+
+function Get-AxisValue([string]$Name, $Readings) {
+    $map = $script:AxisMap[$Name]
+    if (-not $map -or $map[0] -ge $Readings.Count -or $map[1] -lt 0) { return -1 }
+    return $Readings[$map[0]][$map[1]]
+}
+
+# Педаль в покое может стоять как на нуле, так и на максимуме: определяем это по первому чтению
+function Set-PedalBar($Bar, [string]$Name, $Readings) {
+    $value = Get-AxisValue $Name $Readings
+    if ($value -lt 0) {
+        $Bar.Height = 0
+        return
+    }
+    if (-not $script:AxisInvert.ContainsKey($Name)) { $script:AxisInvert[$Name] = $value -gt 32767 }
+    $part = $value / 65535.0
+    if ($script:AxisInvert[$Name]) { $part = 1 - $part }
+    $Bar.Height = [Math]::Round($part * 72)
+}
+
+# Обновляется, только пока лаунчер на экране: в игре оси не читаем
+function Update-Axes {
+    if ($AxesCard.Visibility -ne 'Visible' -or [SimraceNative]::CurrentForeground() -ne [SimraceNative]::LauncherWindow) { return }
+    $readings = New-Object System.Collections.ArrayList
+    foreach ($id in $script:AxisDevices) {
+        $values = [SimraceNative]::ReadJoystick($id)
+        if ($null -eq $values) {
+            $readings.Clear()
+            $script:AxisDevices = @()
+            $script:AxisInvert = @{}
+            break
+        }
+        [void]$readings.Add($values)
+    }
+    if ($readings.Count -eq 0) {
+        if ((Get-Date) -ge $script:AxisNextScan) {
+            $script:AxisNextScan = (Get-Date).AddSeconds(3)
+            $script:AxisDevices = @([SimraceNative]::FindJoysticks(0x346E))
+        }
+        $AxesCard.Opacity = 0.35
+        $BarThrottle.Height = 0
+        $BarBrake.Height = 0
+        $BarClutch.Height = 0
+        $BarWheel.Width = 0
+        $TxtAxesRaw.Text = 'База MOZA не найдена'
+        return
+    }
+    $AxesCard.Opacity = 1
+
+    $wheel = Get-AxisValue 'wheel' $readings
+    if ($wheel -ge 0) {
+        $shift = ($wheel - 32767.5) / 32767.5 * 98
+        $BarWheel.Width = [Math]::Abs($shift)
+        [System.Windows.Controls.Canvas]::SetLeft($BarWheel, 98 + [Math]::Min($shift, 0))
+    }
+    Set-PedalBar $BarThrottle 'throttle' $readings
+    Set-PedalBar $BarBrake 'brake' $readings
+    Set-PedalBar $BarClutch 'clutch' $readings
+
+    # Подсказка при наведении: сырые значения нужны, чтобы привязать оси
+    $script:AxisTick++
+    if ($script:AxisTick % 6 -eq 0) {
+        $lines = for ($i = 0; $i -lt $readings.Count; $i++) {
+            $v = $readings[$i]
+            "Устройство ${i}:  X $($v[0])   Y $($v[1])   Z $($v[2])   R $($v[3])   U $($v[4])   V $($v[5])"
+        }
+        $TxtAxesRaw.Text = ($lines -join "`n")
+    }
 }
 
 # ---------- Интересные факты ----------
@@ -3686,6 +3837,40 @@ function Submit-Decision([bool]$Lock) {
         </Viewbox>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="40,0,0,28">
+          <!-- Оси руля и педалей -->
+          <Border x:Name="AxesCard" Width="236" VerticalAlignment="Bottom" Margin="0,0,32,0" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="18,14" ToolTipService.ShowDuration="600000">
+            <Border.ToolTip>
+              <ToolTip><TextBlock x:Name="TxtAxesRaw" FontSize="14" Text="Чтение осей..."/></ToolTip>
+            </Border.ToolTip>
+            <StackPanel>
+              <TextBlock Text="РУЛЬ" FontSize="12" Foreground="#A2A6AB" Margin="0,0,0,6"/>
+              <Canvas Width="196" Height="10" HorizontalAlignment="Left" Margin="0,0,0,14">
+                <Rectangle Width="196" Height="10" RadiusX="5" RadiusY="5" Fill="#26282C"/>
+                <Rectangle x:Name="BarWheel" Canvas.Left="98" Width="0" Height="10" RadiusX="3" RadiusY="3" Fill="{StaticResource Accent}"/>
+                <Rectangle Canvas.Left="97" Canvas.Top="-2" Width="2" Height="14" Fill="#A2A6AB"/>
+              </Canvas>
+              <UniformGrid Columns="3">
+                <StackPanel Margin="0,0,0,0">
+                <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
+                  <Rectangle x:Name="BarThrottle" Fill="#37C552" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
+                </Border>
+                <TextBlock Text="ГАЗ" FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+              </StackPanel>
+                <StackPanel Margin="0,0,0,0">
+                <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
+                  <Rectangle x:Name="BarBrake" Fill="#E5301A" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
+                </Border>
+                <TextBlock Text="ТОРМОЗ" FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+              </StackPanel>
+                <StackPanel Margin="0,0,0,0">
+                <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
+                  <Rectangle x:Name="BarClutch" Fill="#A2A6AB" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
+                </Border>
+                <TextBlock Text="СЦЕПЛ." FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+              </StackPanel>
+              </UniformGrid>
+            </StackPanel>
+          </Border>
           <StackPanel VerticalAlignment="Bottom" Margin="0,0,32,0">
             <TextBlock Text="Большакова, 99А" FontSize="18" FontWeight="SemiBold" TextAlignment="Right"/>
             <TextBlock Text="14 кокпитов, круглосуточно" FontSize="15" Foreground="{StaticResource Muted}" TextAlignment="Right" Margin="0,0,0,12"/>
@@ -3983,6 +4168,10 @@ try {
     $script:UwfAsync = $null
     $script:UwfPs = $null
     $script:NoticeApp = $null
+    $script:AxisDevices = @()
+    $script:AxisInvert = @{}
+    $script:AxisNextScan = [datetime]::MinValue
+    $script:AxisTick = 0
     $script:LockKnown = $false
     $script:LockTried = $false
     $script:AdminToken = $null
@@ -4030,13 +4219,14 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'SessionFields', 'BtnAdminShutdown', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
     # Логотип вырезан из фирменной обоины без перерисовки. Если файла нет, выводим название текстом.
     if (-not (Set-ImageFile $LogoImage 'logo.png' 600)) { $LogoText.Visibility = 'Visible' }
     Initialize-Facts
+    Initialize-Axes
     [void](Set-ImageFile $BackgroundImage 'background.jpg')
     [void](Set-ImageFile $DashImage 'dash.png')
     [void](Set-ImageFile $DashOffImage 'dash-off.png')
@@ -4308,9 +4498,18 @@ try {
     })
     $hotkeyTimer.Start()
 
+    $axesTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $axesTimer.Interval = [TimeSpan]::FromMilliseconds(66)
+    $axesTimer.Add_Tick({
+        try { Update-Axes }
+        catch { Write-Log "Ошибка чтения осей: $_" }
+    })
+    $axesTimer.Start()
+
     [void]$Window.ShowDialog()
     $timer.Stop()
     $hotkeyTimer.Stop()
+    $axesTimer.Stop()
     $script:SweepTimer.Stop()
     $MixerWindow.Close()
     if ($script:AllowClose -and $script:ExitCode -eq 0) { Restore-Shell }
