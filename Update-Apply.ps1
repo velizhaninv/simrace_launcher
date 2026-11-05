@@ -9,6 +9,9 @@ $installed = $PSScriptRoot
 $work = Join-Path $env:ProgramData 'SIMRACE\Update'
 $resultFile = Join-Path $env:ProgramData 'SIMRACE\update-result.txt'
 
+# Папки может не быть: она создаётся только вместе с программой сервера ACC
+New-Item -ItemType Directory -Path (Split-Path -Parent $resultFile) -Force | Out-Null
+
 function Set-Result([string]$Text) {
     [System.IO.File]::WriteAllText($resultFile, $Text, (New-Object System.Text.UTF8Encoding($false)))
 }

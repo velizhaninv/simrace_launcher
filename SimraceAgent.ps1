@@ -16,6 +16,7 @@ $script:Message = ''
 $script:Token = $null
 $script:TokenUntil = [datetime]::MinValue
 $script:UpdateProcess = $null
+$script:UpdateOk = $true
 
 $logFolder = if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\Logs' } else { Join-Path $env:ProgramData 'SIMRACE\Logs' }
 New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
@@ -185,6 +186,7 @@ function Update-AgentState {
     $script:UpdateProcess = $null
     $result = Join-Path $env:ProgramData 'SIMRACE\update-result.txt'
     $text = ''
+    $script:UpdateOk = $code -eq 0
     if (Test-Path -LiteralPath $result) { $text = ([string](Get-Content -LiteralPath $result -Raw -Encoding UTF8)).Trim() }
     if ($code -eq 0) { $script:Message = "Лаунчер обновлён. $text".Trim() }
     else { $script:Message = "Обновить не удалось. Прежняя версия осталась. $text".Trim() }
@@ -209,7 +211,7 @@ function Invoke-Request($Request) {
     switch ([string]$Request.action) {
         'status' {
             $filter = Get-UwfFilter
-            return @{ ok = $true; state = $script:State; message = $script:Message; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion }
+            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion }
         }
         'auth' {
             $allowed = $false
@@ -309,6 +311,7 @@ try {
         if ($filter -and $filter.CurrentEnabled) {
             $script:State = 'await-decision'
             $script:Message = 'Обновить не удалось: защита UWF не выключилась.'
+            $script:UpdateOk = $false
         }
         else { Start-Update }
     }

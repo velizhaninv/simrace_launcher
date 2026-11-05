@@ -3011,6 +3011,9 @@ function Update-AgentStatus {
         $script:AgentPollUntil = [datetime]::MinValue
         $Overlay.Visibility = 'Collapsed'
         $TxtDecisionText.Text = [string]$status.message
+        # Неудачу видно сразу, а не только по мелкой строке
+        $TxtDecisionText.Foreground = $Window.FindResource($(if ($status.updateOk -eq $false) { 'Accent' } else { 'Muted' }))
+        $TxtDecisionText.FontWeight = $(if ($status.updateOk -eq $false) { [System.Windows.FontWeights]::SemiBold } else { [System.Windows.FontWeights]::Normal })
         $DecisionPanel.Visibility = 'Visible'
         [void]$BtnDecideLock.Focus()
     }
