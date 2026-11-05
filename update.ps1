@@ -1,4 +1,4 @@
-﻿<#
+<#
   Первая установка и обновление вручную. Запуск в терминале от администратора:
   irm https://raw.githubusercontent.com/velizhaninv/simrace_launcher/main/update.ps1 | iex
 #>
@@ -21,7 +21,8 @@
         New-Item -ItemType Directory -Path $destination -Force | Out-Null
         Copy-Item -Path (Join-Path $pack.FullName '*') -Destination $destination -Recurse -Force
         Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-        & (Join-Path $destination 'Auto-Install.ps1') -Quick
+        # Отдельный процесс: по умолчанию Windows запрещает запускать файлы скриптов из терминала
+        & (Join-Path $PSHOME 'powershell.exe') -NoProfile -ExecutionPolicy Bypass -File (Join-Path $destination 'Auto-Install.ps1') -Quick
     }
     catch { Write-Host "Обновление не выполнено: $($_.Exception.Message)" -ForegroundColor Red }
 }
