@@ -4498,18 +4498,22 @@ try {
     })
     $hotkeyTimer.Start()
 
-    $axesTimer = New-Object System.Windows.Threading.DispatcherTimer
-    $axesTimer.Interval = [TimeSpan]::FromMilliseconds(66)
-    $axesTimer.Add_Tick({
+    $script:AxesTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:AxesTimer.Interval = [TimeSpan]::FromMilliseconds(66)
+    $script:AxesTimer.Add_Tick({
         try { Update-Axes }
-        catch { Write-Log "Ошибка чтения осей: $_" }
+        catch {
+            # Чтение идёт 15 раз в секунду: при ошибке останавливаемся, чтобы не забивать журнал и не мешать лаунчеру
+            Write-Log "Чтение осей остановлено: $_"
+            $script:AxesTimer.Stop()
+        }
     })
-    $axesTimer.Start()
+    $script:AxesTimer.Start()
 
     [void]$Window.ShowDialog()
     $timer.Stop()
     $hotkeyTimer.Stop()
-    $axesTimer.Stop()
+    $script:AxesTimer.Stop()
     $script:SweepTimer.Stop()
     $MixerWindow.Close()
     if ($script:AllowClose -and $script:ExitCode -eq 0) { Restore-Shell }
