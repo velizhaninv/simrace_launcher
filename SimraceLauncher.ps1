@@ -1227,6 +1227,7 @@ function Update-UwfStatusCheck {
     catch { Write-Log "Состояние UWF не прочитано: $_" }
     $script:UwfPs.Dispose()
     $script:UwfAsync = $null
+    if ($script:LockKnown) { return }      # служба уже сообщила точное состояние
 
     $state = $text.Trim()
     if ($state -ne 'ON' -and $state -ne 'OFF') {
@@ -1244,7 +1245,14 @@ function Set-UwfDisplay([string]$state) {
     $LampUwf.Fill = New-DeviceBrush $(if ($state -eq 'ON') { '#37C552' } elseif ($state -eq 'OFF') { '#E5301A' } else { '#55585C' })
     $TxtUwfState.Text = $(if ($state -eq 'ON') { 'Защита UWF включена' } elseif ($state -eq 'OFF') { 'Защита UWF выключена' } else { 'Состояние защиты неизвестно' })
     $script:UwfOn = $(if ($state -eq 'ON') { $true } elseif ($state -eq 'OFF') { $false } else { $null })
-    $BtnAdminUwf.Content = $(if ($script:UwfOn -eq $false) { 'Заблокировать ПК' } else { 'Разблокировать ПК' })
+    $TxtAdminUwf.Text = $(if ($script:UwfOn -eq $false) { 'Заблокировать ПК' } else { 'Разблокировать ПК' })
+    # На кнопке показан результат действия, в статус-панели текущее состояние
+    $closedLock = 'M8,11 V7.5 A4,4 0 0 1 16,7.5 V11'
+    $openLock = 'M8,11 V7.5 A4,4 0 0 1 15.6,5.8'
+    $IconAdminUwf.Data = [System.Windows.Media.Geometry]::Parse($(if ($script:UwfOn -eq $false) { $closedLock } else { $openLock }))
+    $IconLock.Data = [System.Windows.Media.Geometry]::Parse($(if ($script:UwfOn -eq $false) { $openLock } else { $closedLock }))
+    $LampLock.Fill = $LampUwf.Fill
+    $LockBox.ToolTip = $TxtUwfState.Text
 }
 
 # Программа рядом с играми: первое нажатие показывает её окно, второе сворачивает.
@@ -1934,7 +1942,7 @@ function Update-TimerLayout {
     $RowsPanel.IsEnabled = -not $idle
     $RowsPanel.Opacity = $(if ($idle) { 0.25 } else { 1 })
     Update-ScrollArrows
-    $BtnPause.Content = $(if ($script:TimerState -eq 'paused') { [string][char]0x25B6 } else { 'II' })
+    $IconPause.Data = [System.Windows.Media.Geometry]::Parse($(if ($script:TimerState -eq 'paused') { 'M8,5 L18,12 L8,19 Z' } else { 'M8,5 V19 M16,5 V19' }))
     $BtnPause.ToolTip = $(if ($script:TimerState -eq 'paused') { 'Продолжить' } else { 'Пауза' })
     Update-TimerDisplay
     if ($idle) { [void]$BtnStartSession.Focus() }
@@ -2998,6 +3006,27 @@ function Close-Launcher([int]$Code) {
     $Window.Close()
 }
 
+# Замок на главном экране. Защита меняется только с перезагрузкой, поэтому достаточно узнать состояние один раз.
+function Update-LockStatus {
+    if ($script:LockKnown) { return }
+    $status = Invoke-Agent @{ action = 'status' } 200
+    if ($status) {
+        $script:LockKnown = $true
+        Set-UwfDisplay $(if ($status.uwfNow) { 'ON' } else { 'OFF' })
+    }
+    elseif (-not $script:LockTried) {
+        # Служба может запуститься позже лаунчера. Пока её нет, смотрим сами.
+        $script:LockTried = $true
+        Start-UwfStatusCheck
+    }
+}
+
+# Индикатор Caps Lock рядом с раскладкой
+function Update-CapsLamp {
+    if ($AdminPanel.Visibility -ne 'Visible') { return }
+    $LampCaps.Visibility = $(if ([System.Windows.Input.Keyboard]::IsKeyToggled('CapsLock')) { 'Visible' } else { 'Hidden' })
+}
+
 # Раз в несколько секунд спрашиваем службу, идёт ли обновление. После загрузки служба может запуститься позже лаунчера.
 function Update-AgentStatus {
     if ((Get-Date) -gt $script:AgentPollUntil) { return }
@@ -3186,6 +3215,96 @@ function Submit-Decision([bool]$Lock) {
       </Setter>
     </Style>
 
+    <Style x:Key="AdminTile" TargetType="Button">
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="5"/>
+      <Setter Property="MinHeight" Value="62"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Box" Background="#1C1E21" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="14" Padding="18,8">
+              <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Box" Property="Background" Value="#26282C"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Box" Property="Background" Value="#303338"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="AdminPrimary" TargetType="Button">
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Box" Background="#D23F0D" CornerRadius="12" Padding="30,13">
+              <ContentPresenter HorizontalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="#E8501B"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="Background" Value="#E8501B"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#B8350A"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="AdminGhost" TargetType="Button">
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="Padding" Value="30,12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Box" Background="Transparent" BorderBrush="#3A3D42" BorderThickness="1" CornerRadius="12" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="#26282C"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="AdminInputBox" TargetType="Border">
+      <Setter Property="Background" Value="#1C1E21"/>
+      <Setter Property="BorderBrush" Value="#2E3135"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="8,4"/>
+    </Style>
+
+    <Style x:Key="AdminGroup" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#7C8085"/>
+      <Setter Property="Margin" Value="0,18,0,5"/>
+    </Style>
+
     <Style x:Key="ScrollArrow" TargetType="Button">
       <Setter Property="Width" Value="58"/>
       <Setter Property="Height" Value="58"/>
@@ -3283,7 +3402,7 @@ function Submit-Decision([bool]$Lock) {
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="Box" Background="#B3121315" BorderBrush="{StaticResource LogoColor}" BorderThickness="2" CornerRadius="18" Padding="14,9,14,9">
-              <ContentPresenter VerticalAlignment="Center"/>
+              <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
@@ -3398,6 +3517,14 @@ function Submit-Decision([bool]$Lock) {
             </Border>
             <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="6,0"/>
             <StackPanel x:Name="StatusLinks" Orientation="Horizontal"/>
+            <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="6,0"/>
+            <StackPanel x:Name="LockBox" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Background="Transparent" ToolTip="Состояние защиты неизвестно">
+              <Canvas Width="24" Height="24" VerticalAlignment="Center">
+                <Rectangle Canvas.Left="5" Canvas.Top="11" Width="14" Height="10" RadiusX="2.2" RadiusY="2.2" Fill="White"/>
+                <Path x:Name="IconLock" Data="M8,11 V7.5 A4,4 0 0 1 16,7.5 V11" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+              </Canvas>
+              <Ellipse x:Name="LampLock" Width="10" Height="10" Fill="#55585C" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
           </StackPanel>
         </Border>
         </StackPanel>
@@ -3413,7 +3540,11 @@ function Submit-Decision([bool]$Lock) {
               <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="0,0,20,0"/>
               <TextBlock Text="Старт" FontSize="16" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
               <TextBlock x:Name="TxtStripStart" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,20,0"/>
-              <Button x:Name="BtnPause" Content="II" MinWidth="58" Style="{StaticResource ToolButton}" Margin="0,0,8,0" ToolTip="Пауза"/>
+              <Button x:Name="BtnPause" MinWidth="58" Style="{StaticResource ToolButton}" Margin="0,0,8,0" ToolTip="Пауза">
+                <Canvas Width="24" Height="24">
+                  <Path x:Name="IconPause" Data="M8,5 V19 M16,5 V19" Stroke="White" Fill="White" StrokeThickness="3.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                </Canvas>
+              </Button>
               <Button x:Name="BtnEndSession" Content="Завершить" Style="{StaticResource ToolButton}" Margin="0,0,20,0"/>
               <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="0,0,20,0"/>
             </StackPanel>
@@ -3496,6 +3627,7 @@ function Submit-Decision([bool]$Lock) {
           <TextBlock x:Name="TxtSelected" Text="Выбери игру" FontSize="42" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
           <TextBlock x:Name="TxtHint" Text="Наведи курсор на обложку" FontSize="20" Foreground="{StaticResource Muted}"/>
         </StackPanel>
+        <TextBlock Text="Свернуть игру: Ctrl+Shift+End" FontSize="15" Foreground="#7C8085" Margin="0,10,0,0"/>
         </StackPanel>
 
         <!-- Приборка: картинка и лампы поверх неё в одной системе координат -->
@@ -3506,8 +3638,8 @@ function Submit-Decision([bool]$Lock) {
               <TextBlock x:Name="TxtDashTimer" Canvas.Left="920" Canvas.Top="226" Width="320" TextAlignment="Center" FontSize="48" Foreground="#E0E2E2" Text="--:--:--"/>
               <TextBlock x:Name="TxtDashStart" Canvas.Left="920" Canvas.Top="322" Width="158" TextAlignment="Center" FontSize="27" Foreground="#E0E2E2" Text="--:--"/>
               <TextBlock x:Name="TxtDashState" Canvas.Left="1082" Canvas.Top="322" Width="158" TextAlignment="Center" FontSize="27" Foreground="#E0E2E2" Text="IDLE"/>
-              <TextBlock x:Name="TxtDashPosition" Canvas.Left="400" Canvas.Top="133" Width="180" TextAlignment="Right" FontSize="27" Foreground="#E0E2E2"/>
-              <TextBlock x:Name="TxtDashLap" Canvas.Left="1004" Canvas.Top="133" Width="80" TextAlignment="Right" FontSize="27" Foreground="#E0E2E2" Text="0"/>
+              <TextBlock x:Name="TxtDashPosition" Canvas.Left="400" Canvas.Top="138" Width="180" TextAlignment="Right" FontSize="27" Foreground="#E0E2E2"/>
+              <TextBlock x:Name="TxtDashLap" Canvas.Left="1004" Canvas.Top="138" Width="80" TextAlignment="Right" FontSize="27" Foreground="#E0E2E2" Text="0"/>
               <TextBlock x:Name="TxtDashText" Canvas.Left="90" Canvas.Top="405" Width="1340" TextAlignment="Center" FontSize="38">
                 <TextBlock.Foreground>
                   <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
@@ -3623,80 +3755,85 @@ function Submit-Decision([bool]$Lock) {
       <Button x:Name="BtnOverlayCorner" Style="{StaticResource CornerLink}" Visibility="Collapsed"/>
     </Grid>
 
-    <Grid x:Name="AdminPanel" Visibility="Collapsed" Background="#F20E0F11">
-      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="760">
-        <TextBlock x:Name="TxtAdminTitle" Text="Панель администратора" FontSize="36" FontWeight="SemiBold" Margin="0,0,0,10"/>
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,26">
-          <Ellipse x:Name="LampUwf" Width="12" Height="12" Fill="#55585C" VerticalAlignment="Center" Margin="0,0,10,0"/>
-          <TextBlock x:Name="TxtUwfState" Text="Проверяю защиту UWF" FontSize="18" Foreground="{StaticResource Muted}"/>
-        </StackPanel>
-
-        <StackPanel x:Name="AdminLogin">
-          <TextBlock Text="Учётная запись администратора Windows" FontSize="20" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
-          <TextBox x:Name="AdminUserInput" FontSize="26" Padding="12,8" Background="#1F2124" Foreground="White" BorderBrush="#34373B" BorderThickness="2" CaretBrush="White" Margin="0,0,0,18"/>
-          <TextBlock Text="Пароль" FontSize="20" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
-          <DockPanel>
-            <Button x:Name="BtnLayout" DockPanel.Dock="Right" Style="{StaticResource ExtraButton}" Width="72" Margin="10,0,0,0" Focusable="False" ToolTip="Сменить раскладку"/>
-            <PasswordBox x:Name="PasswordInput" FontSize="26" Padding="12,8" Background="#1F2124" Foreground="White" BorderBrush="#34373B" BorderThickness="2" CaretBrush="White"/>
+    <Grid x:Name="AdminPanel" Visibility="Collapsed" Background="#E60A0B0D">
+      <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="820" Background="#FA141518" BorderBrush="#2A2D31" BorderThickness="1" CornerRadius="22" Padding="38,32,38,26">
+        <Border.Effect><DropShadowEffect BlurRadius="46" ShadowDepth="0" Color="#E2450F" Opacity="0.13"/></Border.Effect>
+        <StackPanel>
+          <DockPanel Margin="0,0,0,6">
+            <Border DockPanel.Dock="Right" VerticalAlignment="Center" Background="#1C1E21" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="16" Padding="14,7">
+              <StackPanel Orientation="Horizontal">
+                <Ellipse x:Name="LampUwf" Width="10" Height="10" Fill="#55585C" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                <TextBlock x:Name="TxtUwfState" Text="Проверяю защиту UWF" FontSize="15" Foreground="{StaticResource Soft}"/>
+              </StackPanel>
+            </Border>
+            <TextBlock x:Name="TxtAdminTitle" Text="Панель администратора" FontSize="30" FontWeight="SemiBold"/>
           </DockPanel>
-          <TextBlock x:Name="TxtAdminError" Text="Неверный пароль или это не администратор" FontSize="20" Foreground="{StaticResource Accent}" Margin="0,10,0,0" Visibility="Collapsed"/>
-          <StackPanel Orientation="Horizontal" Margin="0,28,0,0">
-            <Button x:Name="BtnAdminLogin" Content="Войти" Style="{StaticResource ActionButton}" Margin="0,0,14,0"/>
-            <Button x:Name="BtnCancel" Content="Отмена" Style="{StaticResource ActionButton}"/>
+
+          <StackPanel x:Name="AdminLogin" Margin="0,14,0,0">
+            <TextBlock Text="Учётная запись администратора Windows" FontSize="16" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
+            <Border Style="{StaticResource AdminInputBox}" Margin="0,0,0,16">
+              <TextBox x:Name="AdminUserInput" FontSize="24" Padding="4,4" Background="Transparent" Foreground="White" BorderThickness="0" CaretBrush="White"/>
+            </Border>
+            <TextBlock Text="Пароль" FontSize="16" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
+            <DockPanel>
+              <Button x:Name="BtnLayout" DockPanel.Dock="Right" Style="{StaticResource AdminGhost}" Padding="0" Width="72" Margin="10,0,0,0" Focusable="False" ToolTip="Сменить раскладку"/>
+              <Ellipse x:Name="LampCaps" DockPanel.Dock="Right" Width="12" Height="12" Margin="14,0,4,0" Fill="#FFB020" Visibility="Hidden" VerticalAlignment="Center" ToolTip="Включён Caps Lock">
+                <Ellipse.Effect><DropShadowEffect BlurRadius="14" ShadowDepth="0" Color="#FFB020" Opacity="0.9"/></Ellipse.Effect>
+              </Ellipse>
+              <Border Style="{StaticResource AdminInputBox}">
+                <PasswordBox x:Name="PasswordInput" FontSize="24" Padding="4,4" Background="Transparent" Foreground="White" BorderThickness="0" CaretBrush="White"/>
+              </Border>
+            </DockPanel>
+            <TextBlock x:Name="TxtAdminError" Text="Неверный пароль или это не администратор" FontSize="18" Foreground="{StaticResource Accent}" Margin="0,10,0,0" Visibility="Collapsed"/>
+            <StackPanel Orientation="Horizontal" Margin="0,24,0,6">
+              <Button x:Name="BtnAdminLogin" Content="Войти" Style="{StaticResource AdminPrimary}" Margin="0,0,10,0"/>
+              <Button x:Name="BtnCancel" Content="Отмена" Style="{StaticResource AdminGhost}"/>
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="AdminMenu" Visibility="Collapsed">
+            <TextBlock Text="ЗАЩИТА" Style="{StaticResource AdminGroup}"/>
+            <UniformGrid Columns="2" Margin="-5,0">
+              <Button x:Name="BtnAdminUwf" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="5" Canvas.Top="11" Width="14" Height="10" RadiusX="2.2" RadiusY="2.2" Fill="#E2450F"/><Path x:Name="IconAdminUwf" Data="M8,11 V7.5 A4,4 0 0 1 15.6,5.8" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock x:Name="TxtAdminUwf" Text="Разблокировать ПК" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnAdminUwfPanel" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M12,2.5 L20,5.5 V11 C20,16 16.5,19.8 12,21.5 C7.5,19.8 4,16 4,11 V5.5 Z" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M8.5,11.5 L11,14 L15.5,9" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Настройки UWF" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
+            </UniformGrid>
+
+            <TextBlock Text="ЛАУНЧЕР" Style="{StaticResource AdminGroup}"/>
+            <Grid Margin="-5,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="92"/>
+                <ColumnDefinition Width="92"/>
+                <ColumnDefinition Width="92"/>
+              </Grid.ColumnDefinitions>
+              <Button x:Name="BtnAdminSettings" Grid.Column="0" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M4,7 H20 M4,17 H20" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Ellipse Canvas.Left="12" Canvas.Top="4" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/><Ellipse Canvas.Left="6" Canvas.Top="14" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Настройки лаунчера" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnMinimizeLauncher" Grid.Column="1" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Свернуть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M5,19 H19" Stroke="White" StrokeThickness="2.4" StrokeStartLineCap="Round"/></Canvas><TextBlock Text="Свернуть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnAdminUpdate" Grid.Column="2" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Обновить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M5,20 H19" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Обновить" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnExit" Grid.Column="3" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Закрыть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/><Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Закрыть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
+            </Grid>
+
+            <TextBlock Text="КОМПЬЮТЕР" Style="{StaticResource AdminGroup}"/>
+            <UniformGrid Columns="2" Margin="-5,0">
+              <Button x:Name="BtnAdminShutdown" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M12,3 V11" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6.8,6.8 A8,8 0 1 0 17.2,6.8" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Выключить ПК" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnAdminReboot" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезагрузить ПК" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
+            </UniformGrid>
+
+            <DockPanel Margin="0,20,0,0">
+              <Button x:Name="BtnAdminClose" DockPanel.Dock="Right" Content="Выйти из панели" Style="{StaticResource CornerLink}" Margin="16,0,-6,0" VerticalAlignment="Center" FontSize="16"/>
+              <TextBlock x:Name="TxtAdminNote" FontSize="15" Foreground="{StaticResource Muted}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </DockPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="AdminConfirm" Visibility="Collapsed" Margin="0,14,0,0">
+            <TextBlock x:Name="TxtConfirmTitle" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,10"/>
+            <TextBlock x:Name="TxtConfirmText" FontSize="18" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,24"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+              <Button x:Name="BtnConfirmOk" Style="{StaticResource AdminPrimary}" Margin="0,0,10,0"/>
+              <Button x:Name="BtnConfirmCancel" Content="Назад" Style="{StaticResource AdminGhost}"/>
+            </StackPanel>
           </StackPanel>
         </StackPanel>
-
-        <StackPanel x:Name="AdminMenu" Visibility="Collapsed">
-          <TextBlock Text="ЗАЩИТА" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
-          <UniformGrid Columns="2" Margin="-6,0,-6,0">
-            <Button x:Name="BtnAdminUwf" Content="Разблокировать ПК" Style="{StaticResource ActionButton}" Margin="6"/>
-            <Button x:Name="BtnAdminUwfPanel" Content="Настройки UWF" Style="{StaticResource ActionButton}" Margin="6"/>
-          </UniformGrid>
-
-          <TextBlock Text="ЛАУНЧЕР" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,18,0,8"/>
-          <Grid Margin="-6,0,-6,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*"/>
-              <ColumnDefinition Width="Auto"/>
-              <ColumnDefinition Width="Auto"/>
-              <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <Button x:Name="BtnAdminSettings" Grid.Column="0" Content="Настройки лаунчера" Style="{StaticResource ActionButton}" Margin="6"/>
-            <Button x:Name="BtnMinimizeLauncher" Grid.Column="1" Style="{StaticResource ActionButton}" Margin="6" ToolTip="Свернуть лаунчер">
-              <Canvas Width="24" Height="24"><Path Data="M5,19 H19" Stroke="White" StrokeThickness="2.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas>
-            </Button>
-            <Button x:Name="BtnAdminUpdate" Grid.Column="2" Style="{StaticResource ActionButton}" Margin="6" ToolTip="Обновить лаунчер">
-              <Canvas Width="24" Height="24">
-                <Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
-                <Path Data="M5,20 H19" Stroke="White" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-              </Canvas>
-            </Button>
-            <Button x:Name="BtnExit" Grid.Column="3" Style="{StaticResource ActionButton}" Margin="6" ToolTip="Закрыть лаунчер">
-              <Canvas Width="24" Height="24">
-                <Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/>
-                <Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-              </Canvas>
-            </Button>
-          </Grid>
-
-          <TextBlock Text="КОМПЬЮТЕР" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,18,0,8"/>
-          <UniformGrid Columns="2" Margin="-6,0,-6,0">
-            <Button x:Name="BtnAdminShutdown" Content="Выключить ПК" Style="{StaticResource ActionButton}" Margin="6"/>
-            <Button x:Name="BtnAdminReboot" Content="Перезагрузить ПК" Style="{StaticResource ActionButton}" Margin="6"/>
-          </UniformGrid>
-          <TextBlock x:Name="TxtAdminNote" FontSize="16" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,22,0,0"/>
-          <Button x:Name="BtnAdminClose" Content="Выйти из панели" Style="{StaticResource CornerLink}" HorizontalAlignment="Left" Margin="-6,14,0,0" FontSize="18"/>
-        </StackPanel>
-
-        <StackPanel x:Name="AdminConfirm" Visibility="Collapsed">
-          <TextBlock x:Name="TxtConfirmTitle" FontSize="28" FontWeight="SemiBold" Margin="0,0,0,12"/>
-          <TextBlock x:Name="TxtConfirmText" FontSize="20" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,28"/>
-          <StackPanel Orientation="Horizontal">
-            <Button x:Name="BtnConfirmOk" Style="{StaticResource ActionButton}" Margin="0,0,14,0"/>
-            <Button x:Name="BtnConfirmCancel" Content="Назад" Style="{StaticResource ActionButton}"/>
-          </StackPanel>
-        </StackPanel>
-      </StackPanel>
+      </Border>
     </Grid>
 
     <!-- Вопрос после обновления -->
@@ -3707,8 +3844,8 @@ function Submit-Decision([bool]$Lock) {
         <TextBlock x:Name="TxtDecisionText" FontSize="20" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
         <TextBlock Text="Заблокировать: включится защита UWF, компьютер перезагрузится и будет готов для гостей. Оставить: защита останется выключенной." FontSize="20" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,28"/>
         <StackPanel Orientation="Horizontal">
-          <Button x:Name="BtnDecideLock" Content="Заблокировать" Style="{StaticResource ActionButton}" Margin="0,0,14,0"/>
-          <Button x:Name="BtnDecideKeep" Content="Оставить как есть" Style="{StaticResource ActionButton}"/>
+          <Button x:Name="BtnDecideLock" Content="Заблокировать" Style="{StaticResource AdminPrimary}" Margin="0,0,10,0"/>
+          <Button x:Name="BtnDecideKeep" Content="Оставить как есть" Style="{StaticResource AdminGhost}"/>
         </StackPanel>
       </StackPanel>
     </Grid>
@@ -3846,6 +3983,8 @@ try {
     $script:UwfAsync = $null
     $script:UwfPs = $null
     $script:NoticeApp = $null
+    $script:LockKnown = $false
+    $script:LockTried = $false
     $script:AdminToken = $null
     $script:AdminPending = ''
     $script:AdminLastUse = [datetime]::MinValue
@@ -3891,7 +4030,7 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'SessionFields', 'BtnAdminShutdown', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'SessionFields', 'BtnAdminShutdown', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
@@ -4130,7 +4269,10 @@ try {
             Update-NetStatusCheck
             Update-TimerDisplay
             Update-Fact
-            if ($script:TickCount % 6 -eq 0) { Update-AgentStatus }
+            if ($script:TickCount % 6 -eq 0) {
+                Update-AgentStatus
+                Update-LockStatus
+            }
             # Открытая панель закрывается сама, если ей не пользуются 10 минут
             if ($AdminPanel.Visibility -eq 'Visible' -and $AdminLogin.Visibility -ne 'Visible' -and ((Get-Date) - $script:AdminLastUse).TotalMinutes -ge 10) { Hide-AdminPanel }
             Update-Devices
@@ -4154,6 +4296,7 @@ try {
     $hotkeyTimer.Add_Tick({
         try {
             Update-UwfStatusCheck
+            Update-CapsLamp
             if ($script:BringTitle) {
                 if ((Get-Date) -gt $script:BringUntil -or [SimraceNative]::ActivateByTitle($script:BringTitle)) { $script:BringTitle = '' }
             }
