@@ -1910,6 +1910,7 @@ function Initialize-Axes {
         $match = [regex]::Match([string]$script:Config.axes.$name, '^(\d+):([XYZRUVxyzruv])$')
         if ($match.Success) { $script:AxisMap[$name] = @([int]$match.Groups[1].Value, 'XYZRUV'.IndexOf($match.Groups[2].Value.ToUpperInvariant())) }
     }
+    $script:ClutchAuto = [string]$script:Config.axes.clutch -eq '0:auto'
     try { Write-Log "Игровые устройства: $([SimraceNative]::DescribeJoysticks())" }
     catch { Write-Log "Игровые устройства не прочитаны: $_" }
 }
@@ -1918,6 +1919,26 @@ function Get-AxisValue([string]$Name, $Readings) {
     $map = $script:AxisMap[$Name]
     if (-not $map -or $map[0] -ge $Readings.Count -or $map[1] -lt 0) { return -1 }
     return $Readings[$map[0]][$map[1]]
+}
+
+# Сцепление сидит на незанятой оси: привязываем ту из них, которая первой сдвинется от положения покоя
+function Find-ClutchAxis($Readings) {
+    if (-not $script:ClutchAuto -or $script:AxisMap['clutch']) { return }
+    $used = @($script:AxisMap.Values | ForEach-Object { $_[1] })
+    $values = $Readings[0]
+    if (-not $script:ClutchRest) {
+        $script:ClutchRest = @($values)
+        return
+    }
+    foreach ($axis in 1..5) {
+        if ($used -contains $axis) { continue }
+        if ([Math]::Abs($values[$axis] - $script:ClutchRest[$axis]) -gt 8000) {
+            $script:AxisMap['clutch'] = @(0, $axis)
+            $script:AxisInvert['clutch'] = $script:ClutchRest[$axis] -gt 32767
+            Write-Log "Сцепление привязано к оси $('XYZRUV'[$axis])"
+            return
+        }
+    }
 }
 
 # Педаль в покое может стоять как на нуле, так и на максимуме: определяем это по первому чтению
@@ -1943,6 +1964,7 @@ function Update-Axes {
             $readings.Clear()
             $script:AxisDevices = @()
             $script:AxisInvert = @{}
+            $script:ClutchRest = $null
             break
         }
         [void]$readings.Add($values)
@@ -1961,6 +1983,7 @@ function Update-Axes {
         return
     }
     $AxesCard.Opacity = 1
+    Find-ClutchAxis $readings
 
     $wheel = Get-AxisValue 'wheel' $readings
     if ($wheel -ge 0) {
@@ -3852,9 +3875,9 @@ function Submit-Decision([bool]$Lock) {
               <UniformGrid Columns="3">
                 <StackPanel Margin="0,0,0,0">
                 <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
-                  <Rectangle x:Name="BarThrottle" Fill="#37C552" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
+                  <Rectangle x:Name="BarClutch" Fill="#A2A6AB" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
                 </Border>
-                <TextBlock Text="ГАЗ" FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                <TextBlock Text="СЦЕПЛ." FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
               </StackPanel>
                 <StackPanel Margin="0,0,0,0">
                 <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
@@ -3864,9 +3887,9 @@ function Submit-Decision([bool]$Lock) {
               </StackPanel>
                 <StackPanel Margin="0,0,0,0">
                 <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
-                  <Rectangle x:Name="BarClutch" Fill="#A2A6AB" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
+                  <Rectangle x:Name="BarThrottle" Fill="#37C552" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
                 </Border>
-                <TextBlock Text="СЦЕПЛ." FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                <TextBlock Text="ГАЗ" FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
               </StackPanel>
               </UniformGrid>
             </StackPanel>
@@ -4172,6 +4195,8 @@ try {
     $script:AxisInvert = @{}
     $script:AxisNextScan = [datetime]::MinValue
     $script:AxisTick = 0
+    $script:ClutchAuto = $false
+    $script:ClutchRest = $null
     $script:LockKnown = $false
     $script:LockTried = $false
     $script:AdminToken = $null

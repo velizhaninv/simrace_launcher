@@ -211,6 +211,7 @@ function Add-MissingProperties($To, $From) {
 }
 $defaults = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $installedLayout = [int]$config.layoutVersion
+$installedAxes = [int]$config.axesVersion
 Add-MissingProperties $config $defaults
 foreach ($section in 'apps', 'utilities', 'categories') {
     foreach ($item in @($defaults.$section)) {
@@ -233,6 +234,11 @@ if ($installedLayout -lt [int]$defaults.layoutVersion) {
     $config.apps = @($ordered + @(@($config.apps) | Where-Object { $defaultIds -notcontains $_.id }))
     $config.categories = $defaults.categories
     $config.layoutVersion = $defaults.layoutVersion
+}
+# Новая привязка осей применяется один раз
+if ($installedAxes -lt [int]$defaults.axesVersion) {
+    $config.axes = $defaults.axes
+    $config.axesVersion = $defaults.axesVersion
 }
 $config.adminUser = $AdminUser
 $config.guestUser = $GuestUser

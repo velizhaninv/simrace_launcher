@@ -275,8 +275,9 @@
   "showAxes": true,
   "axes": {
     "wheel": "0:X",
-    "throttle": "0:Y",
-    "brake": "0:Z",
-    "clutch": "0:R"
-  }
+    "throttle": "0:Z",
+    "brake": "0:R",
+    "clutch": "0:auto"
+  },
+  "axesVersion": 2
 }
