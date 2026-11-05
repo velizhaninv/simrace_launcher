@@ -3385,12 +3385,7 @@ function Submit-Decision([bool]$Lock) {
 
         <StackPanel x:Name="ToolsPanel" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
           <StackPanel x:Name="HeaderTools" Orientation="Horizontal"/>
-        </StackPanel>
-      </Grid>
-
-      <!-- Второй ряд: связь и язык, затем всё о текущем сеансе -->
-      <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
-        <Border x:Name="StatusStrip" Margin="0,0,10,0" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="6">
+        <Border x:Name="StatusStrip" Margin="10,0,0,0" VerticalAlignment="Center" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="6">
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <Button x:Name="BtnStatusLang" Style="{StaticResource StatusButton}" FontSize="18" MinWidth="50" ToolTip="Язык ввода, нажми, чтобы сменить"/>
             <Border x:Name="NetBox" Visibility="Collapsed" Padding="8,0" VerticalAlignment="Center" Background="Transparent">
@@ -3402,7 +3397,11 @@ function Submit-Decision([bool]$Lock) {
             <StackPanel x:Name="StatusLinks" Orientation="Horizontal"/>
           </StackPanel>
         </Border>
+        </StackPanel>
+      </Grid>
 
+      <!-- Второй ряд: всё о текущем сеансе -->
+      <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
         <Border x:Name="SessionStrip" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="22,6,22,6">
           <StackPanel Orientation="Horizontal">
             <StackPanel x:Name="SessionFields" Orientation="Horizontal" Visibility="Collapsed">
