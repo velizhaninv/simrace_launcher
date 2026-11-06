@@ -17,6 +17,8 @@ $script:Token = $null
 $script:TokenUntil = [datetime]::MinValue
 $script:UpdateProcess = $null
 $script:UpdateOk = $true
+$script:OverlayNext = [datetime]::MinValue
+$script:OverlayData = @{ ok = $true; enabled = $false; usedMb = 0; freeMb = 0 }
 
 $logFolder = if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\Logs' } else { Join-Path $env:ProgramData 'SIMRACE\Logs' }
 New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
@@ -179,8 +181,23 @@ function Start-Update {
     $null = $script:UpdateProcess.Handle      # без этого ExitCode будет пустым
 }
 
+# Шкала оверлея: значения обновляются здесь раз в 10 секунд, а лаунчер получает готовый ответ без задержки
+function Update-OverlayCache {
+    if ((Get-Date) -lt $script:OverlayNext) { return }
+    $script:OverlayNext = (Get-Date).AddSeconds(10)
+    try {
+        $filter = Get-UwfFilter
+        $overlay = Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName UWF_Overlay -ErrorAction Stop | Select-Object -First 1
+        $script:OverlayData = @{ ok = $true; enabled = [bool]($filter -and $filter.CurrentEnabled); usedMb = [double]$overlay.OverlayConsumption; freeMb = [double]$overlay.AvailableSpace }
+    }
+    catch {
+        $script:OverlayData = @{ ok = $true; enabled = $false; usedMb = 0; freeMb = 0 }
+    }
+}
+
 # Вызывается раз в секунду, пока никто не подключён
 function Update-AgentState {
+    Update-OverlayCache
     if ($script:State -ne 'updating' -or -not $script:UpdateProcess -or -not $script:UpdateProcess.HasExited) { return }
     $code = $script:UpdateProcess.ExitCode
     $script:UpdateProcess = $null
@@ -213,6 +230,7 @@ function Invoke-Request($Request) {
             $filter = Get-UwfFilter
             return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion }
         }
+        'overlay' { return $script:OverlayData }
         'auth' {
             $allowed = $false
             try { $allowed = [SimraceAgentNative]::IsAdminPassword(([string]$Request.user).Trim(), [string]$Request.password) } catch { Write-Log "Ошибка проверки пароля: $_" }
@@ -276,9 +294,10 @@ function Invoke-Request($Request) {
         'open' {
             Test-Token $Request
             $name = [string]$Request.file
-            if ('UwfPanel.ps1', 'LauncherSettings.ps1' -notcontains $name) { throw 'Неизвестное окно.' }
+            if ('UwfPanel.ps1', 'LauncherSettings.ps1', 'taskmgr' -notcontains $name) { throw 'Неизвестное окно.' }
             $powershell = Join-Path $PSHOME 'powershell.exe'
-            $code = [SimraceAgentNative]::StartOnConsole("`"$powershell`" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $script:Root $name)`"", $script:Root)
+            $command = if ($name -eq 'taskmgr') { "`"$(Join-Path $env:SystemRoot 'System32\Taskmgr.exe')`"" } else { "`"$powershell`" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $script:Root $name)`"" }
+            $code = [SimraceAgentNative]::StartOnConsole($command, $script:Root)
             if ($code -ne 0) { throw "Окно не открылось, код Windows $code." }
             Write-Log "Открыто окно: $name"
             return @{ ok = $true }

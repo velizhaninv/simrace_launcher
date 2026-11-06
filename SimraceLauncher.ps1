@@ -3171,6 +3171,22 @@ function Open-AdminWindow([string]$FileName, [string]$Title) {
     Start-AdminScript $FileName
 }
 
+# Диспетчер задач запрещён гостю, поэтому его открывает служба после входа в панель
+function Open-TaskManager {
+    if ($script:AdminToken) {
+        $response = Invoke-Agent @{ action = 'open'; token = $script:AdminToken; file = 'taskmgr' }
+        if ($response -and $response.ok) {
+            $script:BringTitle = 'Диспетчер задач|Task Manager'
+            $script:BringUntil = (Get-Date).AddSeconds(15)
+            return
+        }
+        Show-AdminNote $(if ($response) { "$($response.error) Если служба ещё старая, перезагрузи ПК." } else { 'Служба лаунчера не ответила.' })
+        return
+    }
+    try { Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\Taskmgr.exe') -Verb RunAs }
+    catch { Write-Log "Диспетчер задач не запущен: $_" }
+}
+
 # Закрытие или перезапуск самого лаунчера
 function Close-Launcher([int]$Code) {
     Write-Log "$(if ($Code -eq 2) { 'Перезапуск' } else { 'Закрытие' }) лаунчера"
@@ -3193,6 +3209,28 @@ function Update-LockStatus {
         $script:LockTried = $true
         Start-UwfStatusCheck
     }
+}
+
+# Заполненность оверлея UWF. Значения готовит служба, поэтому окно не подвисает на запросе к Windows.
+function Update-OverlayGauge {
+    $data = Invoke-Agent @{ action = 'overlay' } 200
+    if (-not $data -or -not $data.ok -or -not $data.enabled) {
+        $OverlayStrip.Visibility = 'Collapsed'
+        return
+    }
+    $used = [double]$data.usedMb
+    $free = [double]$data.freeMb
+    $total = $used + $free
+    if ($total -le 0) {
+        $OverlayStrip.Visibility = 'Collapsed'
+        return
+    }
+    $part = $used / $total
+    $BarOverlay.Width = [Math]::Round(160 * [Math]::Min(1, $part))
+    $BarOverlay.Fill = New-DeviceBrush $(if ($part -ge 0.9) { '#E5301A' } elseif ($part -ge 0.75) { '#FFB020' } else { '#37C552' })
+    $TxtOverlayFree.Text = '{0:0.0} ГБ свободно из {1:0} ГБ' -f ($free / 1024), ($total / 1024)
+    $TxtOverlayFree.Foreground = New-DeviceBrush $(if ($part -ge 0.9) { '#FF6A55' } else { '#FFFFFF' })
+    $OverlayStrip.Visibility = 'Visible'
 }
 
 # Индикатор Caps Lock рядом с раскладкой
@@ -3706,6 +3744,16 @@ function Submit-Decision([bool]$Lock) {
 
       <!-- Второй ряд: всё о текущем сеансе -->
       <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Border x:Name="OverlayStrip" Visibility="Collapsed" Margin="0,0,10,0" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="20,6">
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <TextBlock Text="OVERLAY" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <Border Width="160" Height="10" Background="#26282C" CornerRadius="5" ClipToBounds="True" VerticalAlignment="Center">
+              <Rectangle x:Name="BarOverlay" Width="0" HorizontalAlignment="Left" Fill="#37C552" RadiusX="3" RadiusY="3"/>
+            </Border>
+            <TextBlock x:Name="TxtOverlayFree" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0"/>
+          </StackPanel>
+        </Border>
+
         <Border x:Name="SessionStrip" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="22,6,22,6">
           <StackPanel Orientation="Horizontal">
             <StackPanel x:Name="SessionFields" Orientation="Horizontal" Visibility="Collapsed">
@@ -4013,15 +4061,18 @@ function Submit-Decision([bool]$Lock) {
                 <ColumnDefinition Width="92"/>
                 <ColumnDefinition Width="92"/>
                 <ColumnDefinition Width="92"/>
+                <ColumnDefinition Width="92"/>
               </Grid.ColumnDefinitions>
               <Button x:Name="BtnAdminSettings" Grid.Column="0" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M4,7 H20 M4,17 H20" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Ellipse Canvas.Left="12" Canvas.Top="4" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/><Ellipse Canvas.Left="6" Canvas.Top="14" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Настройки лаунчера" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
               <Button x:Name="BtnMinimizeLauncher" Grid.Column="1" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Свернуть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M5,19 H19" Stroke="White" StrokeThickness="2.4" StrokeStartLineCap="Round"/></Canvas><TextBlock Text="Свернуть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnAdminUpdate" Grid.Column="2" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Обновить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M5,20 H19" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Обновить" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnExit" Grid.Column="3" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Закрыть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/><Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Закрыть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnRestartLauncher" Grid.Column="2" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Перезапустить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезапуск" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnAdminUpdate" Grid.Column="3" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Обновить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M5,20 H19" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Обновить" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnExit" Grid.Column="4" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Закрыть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/><Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Закрыть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
             </Grid>
 
             <TextBlock Text="КОМПЬЮТЕР" Style="{StaticResource AdminGroup}"/>
-            <UniformGrid Columns="2" Margin="-5,0">
+            <UniformGrid Columns="3" Margin="-5,0">
+              <Button x:Name="BtnAdminTaskMgr" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="3" Canvas.Top="4" Width="18" Height="16" RadiusX="3" RadiusY="3" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6,13 H9 L11,9 L13,16 L15,13 H18" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Диспетчер задач" VerticalAlignment="Center" Margin="12,0,0,0"/></StackPanel></Button>
               <Button x:Name="BtnAdminShutdown" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M12,3 V11" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6.8,6.8 A8,8 0 1 0 17.2,6.8" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Выключить ПК" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
               <Button x:Name="BtnAdminReboot" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезагрузить ПК" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
             </UniformGrid>
@@ -4244,7 +4295,7 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
@@ -4376,6 +4427,8 @@ try {
     [void]$ToolsPanel.Children.Add($gear)
 
     $BtnAdminLogin.Add_Click({ Submit-AdminLogin })
+    $BtnRestartLauncher.Add_Click({ Close-Launcher 2 })
+    $BtnAdminTaskMgr.Add_Click({ Open-TaskManager })
     $BtnAdminUpdate.Add_Click({ Request-AdminUpdate })
     $BtnAdminUwf.Add_Click({ Request-AdminUwf })
     $BtnAdminShutdown.Add_Click({ Show-AdminConfirm 'shutdown' 'Выключить ПК' 'Компьютер выключится. Включить его обратно можно только кнопкой на корпусе.' 'Выключить' })
@@ -4484,6 +4537,7 @@ try {
             Update-NetStatusCheck
             Update-TimerDisplay
             Update-Fact
+            if ($script:TickCount % 20 -eq 1) { Update-OverlayGauge }
             if ($script:TickCount % 6 -eq 0) {
                 Update-AgentStatus
                 Update-LockStatus
@@ -4513,7 +4567,9 @@ try {
             Update-UwfStatusCheck
             Update-CapsLamp
             if ($script:BringTitle) {
-                if ((Get-Date) -gt $script:BringUntil -or [SimraceNative]::ActivateByTitle($script:BringTitle)) { $script:BringTitle = '' }
+                $shown = $false
+                foreach ($title in $script:BringTitle -split '\|') { if ([SimraceNative]::ActivateByTitle($title)) { $shown = $true } }
+                if ($shown -or (Get-Date) -gt $script:BringUntil) { $script:BringTitle = '' }
             }
             if ([SimraceNative]::TakeAdminRequest()) { Show-AdminPanel }
             if ([SimraceNative]::TakeMixerRequest()) { Switch-MixerWindow }
