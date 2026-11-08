@@ -214,6 +214,7 @@ function Add-MissingProperties($To, $From) {
 $defaults = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $installedLayout = [int]$config.layoutVersion
 $installedAxes = [int]$config.axesVersion
+$installedInfo = [int]$config.infoVersion
 Add-MissingProperties $config $defaults
 foreach ($section in 'apps', 'utilities', 'categories') {
     foreach ($item in @($defaults.$section)) {
@@ -236,6 +237,14 @@ if ($installedLayout -lt [int]$defaults.layoutVersion) {
     $config.apps = @($ordered + @(@($config.apps) | Where-Object { $defaultIds -notcontains $_.id }))
     $config.categories = $defaults.categories
     $config.layoutVersion = $defaults.layoutVersion
+}
+# Описания игр из новой версии заменяют старые один раз. Свои правки после этого не затрагиваются.
+if ($installedInfo -lt [int]$defaults.infoVersion) {
+    foreach ($item in @($defaults.apps)) {
+        $existing = @($config.apps) | Where-Object { $_.id -eq $item.id } | Select-Object -First 1
+        if ($existing -and $item.info) { $existing | Add-Member -NotePropertyName info -NotePropertyValue $item.info -Force }
+    }
+    $config | Add-Member -NotePropertyName infoVersion -NotePropertyValue $defaults.infoVersion -Force
 }
 # Новая привязка осей применяется один раз
 if ($installedAxes -lt [int]$defaults.axesVersion) {

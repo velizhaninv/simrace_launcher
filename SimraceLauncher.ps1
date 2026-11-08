@@ -3059,7 +3059,20 @@ function Stop-CurrentGame {
 # ---------- Выход для сотрудника ----------
 
 # Имя администратора: из настроек, иначе первая включённая учётная запись группы администраторов.
+# Администратор по имени компьютера: SIMRACE-5 -> admin5. Исключение: на SIMRACE-14 просто admin.
+function Get-AdminByComputerName {
+    $match = [regex]::Match($env:COMPUTERNAME, '(\d+)$')
+    if (-not $match.Success) { return '' }
+    $number = [int]$match.Value
+    return $(if ($number -eq 14) { 'admin' } else { "admin$number" })
+}
+
 function Get-DefaultAdminName {
+    $byName = Get-AdminByComputerName
+    if ($byName) {
+        try { if (Get-LocalUser -Name $byName -ErrorAction Stop) { return $byName } }
+        catch { }
+    }
     if ($script:Config.adminUser) { return [string]$script:Config.adminUser }
     try {
         $accounts = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | Where-Object { $_.ObjectClass -eq 'User' -and $_.PrincipalSource -eq 'Local' } | ForEach-Object {
@@ -3737,8 +3750,6 @@ function Submit-Decision([bool]$Lock) {
     </Style>
 
     <Style x:Key="InfoBadge" TargetType="Button">
-      <Setter Property="Width" Value="38"/>
-      <Setter Property="Height" Value="38"/>
       <Setter Property="Margin" Value="0,10,10,0"/>
       <Setter Property="HorizontalAlignment" Value="Right"/>
       <Setter Property="VerticalAlignment" Value="Top"/>
@@ -3747,14 +3758,20 @@ function Submit-Decision([bool]$Lock) {
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Grid>
-              <Ellipse x:Name="Dot" Fill="#B30D0E10" Stroke="#66FFFFFF" StrokeThickness="1.5"/>
-              <TextBlock Text="i" FontSize="21" FontWeight="Bold" FontFamily="Georgia" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,2"/>
-            </Grid>
+            <Border x:Name="Pill" Background="#C70D0E10" BorderBrush="#59FFFFFF" BorderThickness="1" CornerRadius="15" Padding="8,5,13,5">
+              <StackPanel Orientation="Horizontal">
+                <Grid Width="18" Height="18" VerticalAlignment="Center">
+                  <Ellipse x:Name="Ring" Stroke="#E2450F" StrokeThickness="1.6"/>
+                  <TextBlock Text="i" FontSize="12" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+                <TextBlock Text="Об игре" FontSize="14" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" Margin="7,0,0,1"/>
+              </StackPanel>
+            </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Dot" Property="Fill" Value="#E2450F"/>
-                <Setter TargetName="Dot" Property="Stroke" Value="#E2450F"/>
+                <Setter TargetName="Pill" Property="Background" Value="#E2450F"/>
+                <Setter TargetName="Pill" Property="BorderBrush" Value="#E2450F"/>
+                <Setter TargetName="Ring" Property="Stroke" Value="White"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>

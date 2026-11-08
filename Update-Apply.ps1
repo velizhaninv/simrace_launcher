@@ -50,7 +50,7 @@ try {
     $admin = [string]$config.adminUser
     if (-not $admin) {
         $number = [regex]::Match($env:COMPUTERNAME, '(\d+)$')
-        $admin = $(if ($number.Success) { "admin$([int]$number.Value)" } else { '' })
+        $admin = $(if (-not $number.Success) { '' } elseif ([int]$number.Value -eq 14) { 'admin' } else { "admin$([int]$number.Value)" })
     }
 
     & (Join-Path $pack.FullName 'Install-Launcher.ps1') -GuestUser $guest -AdminUser $admin | Out-Null
