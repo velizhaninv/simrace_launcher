@@ -719,7 +719,26 @@ if (-not $Child) {
         while ($true) {
             $process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
             $null = $process.Handle      # без этого ExitCode будет пустым
-            $process.WaitForExit()
+            # Окно может зависнуть, не падая. Windows отвечает, реагирует ли окно на сообщения (ждёт до 5 секунд).
+            $hung = 0
+            while (-not $process.WaitForExit(5000)) {
+                $process.Refresh()
+                if ($process.Responding) {
+                    if ($hung -gt 0) { Write-Log "Окно снова отвечает после $($hung * 5) с" }
+                    $hung = 0
+                    continue
+                }
+                $hung++
+                if ($hung -eq 1) { Write-Log 'Окно лаунчера не отвечает' }
+                if ($hung -ge 6) {
+                    Write-Log 'Окно не отвечает 30 секунд, перезапускаю'
+                    # Защита процесса не мешает: права на завершение у сторожа есть с момента запуска окна
+                    try { $process.Kill() }
+                    catch { Write-Log "Зависшее окно не завершено: $_" }
+                    $process.WaitForExit()
+                    break
+                }
+            }
             Write-Log "Окно завершилось с кодом $($process.ExitCode)"
             if ($process.ExitCode -eq 0) { exit 0 }     # код 0 только у штатного выхода
 
@@ -746,7 +765,10 @@ if (-not $Child) {
 # ---------- Окно ----------
 
 $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\SimraceLauncher')
-if (-not $script:Mutex.WaitOne(0)) { exit 0 }
+$owned = $false
+try { $owned = $script:Mutex.WaitOne(0) }
+catch [System.Threading.AbandonedMutexException] { $owned = $true }     # прошлое окно завершилось аварийно
+if (-not $owned) { exit 0 }
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
@@ -1901,6 +1923,37 @@ function Update-Proportions {
     Update-FeatureWidth
 }
 
+# ---------- Подключение устройств ----------
+
+# Скрытое окно получает от Windows сообщение о подключении и отключении USB-устройств.
+# Если создать его не удалось, устройства проверяются по таймеру, как раньше.
+function Start-DeviceWatch {
+    $script:DeviceWatch = $null
+    try {
+        if (-not ('SimraceDeviceWatch' -as [type])) {
+            Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+public class SimraceDeviceWatch : System.Windows.Forms.NativeWindow
+{
+    public static volatile bool Changed = true;
+    public SimraceDeviceWatch()
+    {
+        System.Windows.Forms.CreateParams parameters = new System.Windows.Forms.CreateParams();
+        parameters.Caption = "SimraceDeviceWatch";
+        CreateHandle(parameters);
+    }
+    protected override void WndProc(ref System.Windows.Forms.Message message)
+    {
+        if (message.Msg == 0x219) Changed = true;      // WM_DEVICECHANGE
+        base.WndProc(ref message);
+    }
+}
+'@
+        }
+        $script:DeviceWatch = New-Object SimraceDeviceWatch
+    }
+    catch { Write-Log "Слежение за подключением устройств недоступно, проверка по таймеру: $_" }
+}
+
 # ---------- Оси руля и педалей ----------
 
 # Привязка из apps.json: "0:X" значит устройство MOZA номер 0, ось X.
@@ -2222,9 +2275,16 @@ function Update-Devices {
             if ($null -eq $power) { $power = $present }     # первое устройство в списке это база
         }
         if ($null -ne $power) { Set-DashPower $power }
-        $seconds = if ($script:Config.deviceCheckSeconds) { [double]$script:Config.deviceCheckSeconds } else { 2 }
+        # Со слежением за подключением хватает редкой контрольной проверки
+        $seconds = if ($script:DeviceWatch) { 15 } elseif ($script:Config.deviceCheckSeconds) { [double]$script:Config.deviceCheckSeconds } else { 2 }
         $script:DeviceNext = (Get-Date).AddSeconds($seconds)
         return
+    }
+    if ($script:DeviceWatch -and [SimraceDeviceWatch]::Changed) {
+        [SimraceDeviceWatch]::Changed = $false
+        # Устройство подключили или отключили: проверяем через секунду, когда Windows его настроит
+        $soon = (Get-Date).AddSeconds(1)
+        if ($soon -lt $script:DeviceNext) { $script:DeviceNext = $soon }
     }
     if ($script:Session -or (Get-Date) -lt $script:DeviceNext) { return }
     $script:DevicePs = [powershell]::Create()
@@ -3207,10 +3267,51 @@ function Close-Launcher([int]$Code) {
     $Window.Close()
 }
 
+# ---------- Опрос службы в фоне: окно не ждёт её ответа ----------
+
+function Start-AgentPoller {
+    $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false })
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript({
+        param($Shared)
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+        function Send-Line([string]$Line) {
+            $client = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'SimraceAgent', [System.IO.Pipes.PipeDirection]::InOut)
+            try {
+                $client.Connect(500)
+                $writer = New-Object System.IO.StreamWriter($client, $encoding, 4096, $true)
+                $writer.AutoFlush = $true
+                $reader = New-Object System.IO.StreamReader($client, $encoding, $false, 4096, $true)
+                $writer.WriteLine($Line)
+                return $reader.ReadLine()
+            }
+            catch { return $null }
+            finally { $client.Dispose() }
+        }
+        $tick = 0
+        while (-not $Shared.Stop) {
+            $Shared.Status = Send-Line '{"action":"status"}'
+            if ($tick % 5 -eq 0) { $Shared.Overlay = Send-Line '{"action":"overlay"}' }
+            $tick++
+            Start-Sleep -Seconds 2
+        }
+    }).AddArgument($script:AgentShared)
+    $script:AgentPoller = $ps
+    [void]$ps.BeginInvoke()
+}
+
+# Последний ответ службы. $null: служба не запущена или ещё не ответила.
+function Get-AgentShared([string]$Key) {
+    if (-not $script:AgentShared) { return $null }
+    $line = $script:AgentShared[$Key]
+    if (-not $line) { return $null }
+    try { return ($line | ConvertFrom-Json) } catch { return $null }
+}
+
 # Замок на главном экране. Защита меняется только с перезагрузкой, поэтому достаточно узнать состояние один раз.
 function Update-LockStatus {
     if ($script:LockKnown) { return }
-    $status = Invoke-Agent @{ action = 'status' } 200
+    $status = Get-AgentShared 'Status'
     if ($status) {
         $script:LockKnown = $true
         Set-UwfDisplay $(if ($status.uwfNow) { 'ON' } else { 'OFF' })
@@ -3224,7 +3325,7 @@ function Update-LockStatus {
 
 # Заполненность оверлея UWF. Значения готовит служба, поэтому окно не подвисает на запросе к Windows.
 function Update-OverlayGauge {
-    $data = Invoke-Agent @{ action = 'overlay' } 200
+    $data = Get-AgentShared 'Overlay'
     if (-not $data -or -not $data.ok -or -not $data.enabled) {
         $OverlayStrip.Visibility = 'Collapsed'
         return
@@ -3253,7 +3354,7 @@ function Update-CapsLamp {
 # Раз в несколько секунд спрашиваем службу, идёт ли обновление. После загрузки служба может запуститься позже лаунчера.
 function Update-AgentStatus {
     if ((Get-Date) -gt $script:AgentPollUntil) { return }
-    $status = Invoke-Agent @{ action = 'status' } 200
+    $status = Get-AgentShared 'Status'
     if (-not $status) { return }
     if ($status.state -eq 'updating') {
         $script:AgentPollUntil = (Get-Date).AddMinutes(3)
@@ -4253,6 +4354,8 @@ try {
     $script:UwfAsync = $null
     $script:UwfPs = $null
     $script:NoticeApp = $null
+    $script:DeviceWatch = $null
+    $script:AgentShared = $null
     $script:AxisDevices = @()
     $script:AxisInvert = @{}
     $script:AxisNextScan = [datetime]::MinValue
@@ -4314,6 +4417,8 @@ try {
     if (-not (Set-ImageFile $LogoImage 'logo.png' 600)) { $LogoText.Visibility = 'Visible' }
     Initialize-Facts
     Initialize-Axes
+    Start-AgentPoller
+    Start-DeviceWatch
     [void](Set-ImageFile $BackgroundImage 'background.jpg')
     [void](Set-ImageFile $DashImage 'dash.png')
     [void](Set-ImageFile $DashOffImage 'dash-off.png')
@@ -4606,6 +4711,7 @@ try {
     $timer.Stop()
     $hotkeyTimer.Stop()
     $script:AxesTimer.Stop()
+    if ($script:AgentShared) { $script:AgentShared.Stop = $true }
     $script:SweepTimer.Stop()
     $MixerWindow.Close()
     if ($script:AllowClose -and $script:ExitCode -eq 0) { Restore-Shell }
