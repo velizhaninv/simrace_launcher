@@ -2890,9 +2890,20 @@ function Show-Launcher {
 }
 
 function Resume-Game {
-    [SimraceNative]::MinimizeOtherWindows($script:GameWindow)
+    $target = $script:GameWindow
+    # Игра закрыта, а Content Manager или другая программа запуска ещё открыта: возвращаемся в неё
+    if (-not [SimraceNative]::WindowExists($target) -and $script:Session) {
+        $found = Find-SessionGameWindow $script:Session
+        $target = $(if ($found -ne [IntPtr]::Zero) { $found } else { Get-HostWindow $script:Session })
+        if ($found -ne [IntPtr]::Zero) { $script:GameWindow = $found }
+    }
+    if (-not [SimraceNative]::WindowExists($target)) {
+        Write-Log 'Вернуться в игру: окно игры не найдено'
+        return
+    }
+    [SimraceNative]::MinimizeOtherWindows($target)
     [SimraceNative]::SendToBack()
-    [SimraceNative]::ActivateWindow($script:GameWindow)
+    [SimraceNative]::ForceForeground($target)
 }
 
 # Команда «В лаунчер». Пока Steam ждёт выбора аккаунта, возвращаться можно только к плиткам: запуск отменяется.
