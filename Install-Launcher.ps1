@@ -26,6 +26,7 @@ $taskName  = 'SIMRACE Launcher'
 $taskPath  = '\SIMRACE\'
 $agentTask = 'SIMRACE Agent'
 $settingsLink = Join-Path $env:PUBLIC 'Desktop\Настройки лаунчера SIMRACE.lnk'
+$launcherLink = Join-Path $env:PUBLIC 'Desktop\Лаунчер SIMRACE.lnk'
 $oldLink   = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp\SIMRACE Launcher.lnk'
 $winlogon  = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 $toolsRoot = Join-Path $env:ProgramData 'SIMRACE\Tools'
@@ -159,6 +160,7 @@ if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $agentTask -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $oldLink) { Remove-Item -LiteralPath $oldLink -Force }
     if (Test-Path -LiteralPath $settingsLink) { Remove-Item -LiteralPath $settingsLink -Force }
+    if (Test-Path -LiteralPath $launcherLink) { Remove-Item -LiteralPath $launcherLink -Force }
     if (Test-Path -LiteralPath $target)  { Remove-Item -LiteralPath $target -Recurse -Force }
     if (Test-Path -LiteralPath $toolsRoot) { Remove-Item -LiteralPath $toolsRoot -Recurse -Force }
     Set-GuestPolicies $GuestUser $false
@@ -168,7 +170,7 @@ if ($Uninstall) {
 
 # Копируем файлы
 New-Item -ItemType Directory -Path (Join-Path $target 'images') -Force | Out-Null
-foreach ($file in 'SimraceLauncher.ps1', 'LauncherSettings.ps1', 'Settings-Launcher.cmd', 'UwfPanel.ps1', 'SimraceAgent.ps1', 'Update-Apply.ps1', 'version.txt', 'apps.json', 'facts.txt', 'logo.png', 'background.jpg', 'dash.png', 'dash-off.png', 'qr-telegram.png', 'qr-site.png') {
+foreach ($file in 'SimraceLauncher.ps1', 'LauncherSettings.ps1', 'Settings-Launcher.cmd', 'Start-Launcher.cmd', 'UwfPanel.ps1', 'SimraceAgent.ps1', 'Update-Apply.ps1', 'version.txt', 'apps.json', 'facts.txt', 'logo.png', 'background.jpg', 'dash.png', 'dash-off.png', 'qr-telegram.png', 'qr-site.png') {
     $source = Join-Path $PSScriptRoot $file
     # При обновлении настройки сохраняются: игры, логины и кнопки под плитками
     if ($file -eq 'apps.json' -and -not $ResetConfig -and (Test-Path -LiteralPath (Join-Path $target 'apps.json'))) {
@@ -293,6 +295,13 @@ Set-GuestPolicies $GuestUser $true
 # Ярлык настроек на общем рабочем столе. Гость его не увидит: рабочий стол закрыт лаунчером.
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($settingsLink)
 $link.TargetPath = Join-Path $target 'Settings-Launcher.cmd'
+$link.WorkingDirectory = $target
+$link.WindowStyle = 7
+$link.Save()
+
+# Ярлык самого лаунчера: запустить его снова после закрытия. Второй копии не будет, лишний запуск просто завершится.
+$link = (New-Object -ComObject WScript.Shell).CreateShortcut($launcherLink)
+$link.TargetPath = Join-Path $target 'Start-Launcher.cmd'
 $link.WorkingDirectory = $target
 $link.WindowStyle = 7
 $link.Save()

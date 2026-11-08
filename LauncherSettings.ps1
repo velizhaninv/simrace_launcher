@@ -254,6 +254,14 @@ function Save-Config {
     Update-List $script:Index
     $TxtStatus.Text = if ($empty.Count -gt 0) { "Сохранено. Плитки не появятся, не выбран запуск: $($empty -join ', ')" }
                       else { 'Сохранено. Изменения появятся при следующем запуске лаунчера.' }
+    # Лаунчер следит за этим файлом и перезапускается, когда видит свежую отметку. Во время игры он дождётся её окончания.
+    if ([System.Windows.MessageBox]::Show($Window, 'Перезапустить лаунчер сейчас, чтобы изменения появились? Если идёт игра, лаунчер перезапустится после неё.', 'Настройки лаунчера', 'YesNo', 'Question') -eq 'Yes') {
+        try {
+            Set-Content -LiteralPath (Join-Path (Split-Path -Parent $script:ConfigPath) 'restart-request.txt') -Value (Get-Date -Format o) -Encoding ASCII
+            $TxtStatus.Text = 'Сохранено. Лаунчер перезапускается.'
+        }
+        catch { $TxtStatus.Text = "Сохранено, но перезапуск не запрошен: $_" }
+    }
 }
 
 [xml]$xaml = @'

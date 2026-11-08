@@ -722,8 +722,13 @@ if (-not $Child) {
             # Окно может зависнуть, не падая. Windows отвечает, реагирует ли окно на сообщения (ждёт до 5 секунд).
             $hung = 0
             while (-not $process.WaitForExit(5000)) {
-                $process.Refresh()
-                if ($process.Responding) {
+                $responding = $true
+                try {
+                    $process.Refresh()
+                    $responding = $process.Responding
+                }
+                catch { continue }      # процесс как раз завершился
+                if ($responding) {
                     if ($hung -gt 0) { Write-Log "Окно снова отвечает после $($hung * 5) с" }
                     $hung = 0
                     continue
@@ -1008,7 +1013,7 @@ function Find-Cover($App) {
 function Resolve-App($App) {
     if ($App.enabled -eq $false) { return $null }
     $watch = @($App.watch | Where-Object { $_ })
-    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; LaunchTimeout = $App.launchTimeoutSeconds; Extra = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
+    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; Info = [string]$App.info; LaunchTimeout = $App.launchTimeoutSeconds; Extra = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
     if ($App.extra) {
         try { $common.Extra = Resolve-App $App.extra }
         catch { Write-Log "$($App.name): ошибка дополнительной кнопки: $_" }
@@ -2499,6 +2504,18 @@ function Open-App($App, [bool]$NoticeSeen = $false) {
     else { Start-App $App }
 }
 
+function Show-GameInfo($App) {
+    $TxtInfoTitle.Text = $App.Name
+    $TxtInfoText.Text = $App.Info
+    $InfoPanel.Visibility = 'Visible'
+    [void]$BtnInfoOk.Focus()
+}
+
+function Hide-GameInfo {
+    $InfoPanel.Visibility = 'Collapsed'
+    if ($script:LastTile) { [void]$script:LastTile.Focus() }
+}
+
 function New-Tile($App) {
     $button = New-Object System.Windows.Controls.Button
     $button.Style = $Window.FindResource('TileButton')
@@ -2518,6 +2535,22 @@ function New-Tile($App) {
         $content.FontSize = 26
         $content.FontWeight = [System.Windows.FontWeights]::SemiBold
         $content.Foreground = [System.Windows.Media.Brushes]::White
+    }
+    # Значок «i» в углу плитки: описание игры простыми словами
+    if ($App.Info) {
+        $holder = New-Object System.Windows.Controls.Grid
+        [void]$holder.Children.Add($content)
+        $info = New-Object System.Windows.Controls.Button
+        $info.Style = $Window.FindResource('InfoBadge')
+        $info.Tag = $App
+        $info.ToolTip = 'Об игре'
+        $info.Add_Click({
+            param($sender, $e)
+            $e.Handled = $true
+            Show-GameInfo $sender.Tag
+        })
+        [void]$holder.Children.Add($info)
+        $content = $holder
     }
     $button.Content = $content
 
@@ -3258,6 +3291,15 @@ function Open-TaskManager {
     catch { Write-Log "Диспетчер задач не запущен: $_" }
 }
 
+# Настройки сохранены и администратор попросил перезапуск. Во время игры ждём её окончания.
+function Test-RestartRequest {
+    if ($script:Session) { return }
+    $file = Get-Item -LiteralPath $script:RestartFile -ErrorAction SilentlyContinue
+    if (-not $file -or $file.LastWriteTime -le $script:StartedAt) { return }
+    Write-Log 'Перезапуск по запросу из настроек'
+    Close-Launcher 2
+}
+
 # Закрытие или перезапуск самого лаунчера
 function Close-Launcher([int]$Code) {
     Write-Log "$(if ($Code -eq 2) { 'Перезапуск' } else { 'Закрытие' }) лаунчера"
@@ -3694,6 +3736,32 @@ function Submit-Decision([bool]$Lock) {
       </Setter>
     </Style>
 
+    <Style x:Key="InfoBadge" TargetType="Button">
+      <Setter Property="Width" Value="38"/>
+      <Setter Property="Height" Value="38"/>
+      <Setter Property="Margin" Value="0,10,10,0"/>
+      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="VerticalAlignment" Value="Top"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Grid>
+              <Ellipse x:Name="Dot" Fill="#B30D0E10" Stroke="#66FFFFFF" StrokeThickness="1.5"/>
+              <TextBlock Text="i" FontSize="21" FontWeight="Bold" FontFamily="Georgia" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,2"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Dot" Property="Fill" Value="#E2450F"/>
+                <Setter TargetName="Dot" Property="Stroke" Value="#E2450F"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="StartButton" TargetType="Button">
       <Setter Property="FontSize" Value="28"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
@@ -4086,6 +4154,19 @@ function Submit-Decision([bool]$Lock) {
       </Grid>
     </Grid>
 
+    <!-- Описание игры по значку «i» -->
+    <Grid x:Name="InfoPanel" Visibility="Collapsed" Background="#B3090A0C">
+      <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="780" Background="#F7181A1C" BorderBrush="#29FFFFFF" BorderThickness="1" CornerRadius="18" Padding="48,36,48,36">
+        <Border.Effect><DropShadowEffect BlurRadius="44" ShadowDepth="0" Color="#E2450F" Opacity="0.16"/></Border.Effect>
+        <StackPanel>
+          <Rectangle Width="56" Height="3" Fill="{StaticResource Accent}" HorizontalAlignment="Left" Margin="0,0,0,18"/>
+          <TextBlock x:Name="TxtInfoTitle" FontSize="34" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,16"/>
+          <TextBlock x:Name="TxtInfoText" FontSize="22" LineHeight="32" Foreground="{StaticResource Soft}" TextWrapping="Wrap" Margin="0,0,0,30"/>
+          <Button x:Name="BtnInfoOk" Content="Понятно" Style="{StaticResource StartButton}" FontSize="22" MinWidth="200" HorizontalAlignment="Left"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+
     <!-- Предупреждение перед запуском игры из категории PRO -->
     <Grid x:Name="NoticePanel" Visibility="Collapsed" Background="#9E090A0C">
       <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="640" Background="#F7181A1C" BorderBrush="#29FFFFFF" BorderThickness="1" CornerRadius="18" Padding="48,34,48,36">
@@ -4339,6 +4420,8 @@ try {
     $script:SteamLibraries = Get-SteamLibraries $script:SteamRoot
 
     $script:ExitCode = 0
+    $script:StartedAt = Get-Date
+    $script:RestartFile = Join-Path $script:Root 'restart-request.txt'
     $script:WaitCornerAt = [datetime]::MaxValue
     $script:StatusLamps = @{}
     $script:NetAsync = $null
@@ -4409,7 +4492,7 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
@@ -4560,6 +4643,12 @@ try {
     $BtnDecideKeep.Add_Click({ Submit-Decision $false })
     $AdminPanel.Add_PreviewMouseDown({ $script:AdminLastUse = Get-Date })
 
+    $BtnInfoOk.Add_Click({ Hide-GameInfo })
+    # Щелчок мимо карточки тоже закрывает описание
+    $InfoPanel.Add_MouseLeftButtonUp({
+        param($sender, $e)
+        if ($e.OriginalSource -eq $InfoPanel) { Hide-GameInfo }
+    })
     $BtnNoticeOk.Add_Click({
         $NoticePanel.Visibility = 'Collapsed'
         $app = $script:NoticeApp
@@ -4654,6 +4743,7 @@ try {
             Update-TimerDisplay
             Update-Fact
             if ($script:TickCount % 20 -eq 1) { Update-OverlayGauge }
+            if ($script:TickCount % 4 -eq 2) { Test-RestartRequest }
             if ($script:TickCount % 6 -eq 0) {
                 Update-AgentStatus
                 Update-LockStatus
@@ -4725,4 +4815,6 @@ finally {
     $script:Mutex.ReleaseMutex()
 }
 
-exit $script:ExitCode
+Write-Log "Окно закрывается, код $($script:ExitCode)"
+# Фоновые проверки не должны задерживать завершение: сторож перезапускает окно, только когда процесс вышел
+[Environment]::Exit([int]$script:ExitCode)
