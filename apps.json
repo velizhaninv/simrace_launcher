@@ -115,6 +115,7 @@
     {
       "id": "f1-25",
       "name": "F1 25",
+      "launchTimeoutSeconds": 600,
       "steamAppId": "3059520",
       "shortcut": [
         "*F1*25*",

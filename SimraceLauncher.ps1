@@ -986,7 +986,7 @@ function Find-Cover($App) {
 function Resolve-App($App) {
     if ($App.enabled -eq $false) { return $null }
     $watch = @($App.watch | Where-Object { $_ })
-    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; Extra = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
+    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; LaunchTimeout = $App.launchTimeoutSeconds; Extra = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
     if ($App.extra) {
         try { $common.Extra = Resolve-App $App.extra }
         catch { Write-Log "$($App.name): ошибка дополнительной кнопки: $_" }
@@ -1707,7 +1707,7 @@ function Update-Session {
                 $grace = if ($session.App.ExitGrace) { [int]$session.App.ExitGrace } else { $script:ExitGrace }
                 if ($session.Misses -ge $grace) { Stop-Session }
             }
-            elseif ($elapsed -gt $script:LaunchTimeout) {
+            elseif ($elapsed -gt $(if ($session.App.LaunchTimeout) { [int]$session.App.LaunchTimeout } else { $script:LaunchTimeout })) {
                 Stop-SessionWithError "$($session.App.Name) не запустилась" 'Попробуй ещё раз. Если не получится, позови администратора клуба.'
             }
         }
