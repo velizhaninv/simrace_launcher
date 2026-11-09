@@ -157,8 +157,53 @@ function Get-Pending {
 
 function Get-UwfFilter { return (Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName UWF_Filter -ErrorAction SilentlyContinue) }
 
+# ---------- Файл подкачки на диске Z: ----------
+
+$script:PageDrive = 'Z:'
+$script:PageFileMB = 15000
+$script:MemoryKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management'
+
+# Защищён ли диск после следующей загрузки
+function Test-NextProtected([string]$Letter) {
+    return [bool](Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName UWF_Volume -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.CurrentSession -and $_.DriveLetter -eq $Letter -and $_.Protected })
+}
+
+# Файл подкачки фиксированного размера на Z:, сам диск Z: без защиты UWF.
+# Вызывается при каждой загрузке и перед включением защиты. Если всё уже настроено, ничего не меняет.
+# Новый файл подкачки начинает работать после следующей перезагрузки.
+function Set-PageFileOnZ {
+    if (-not (Test-Path -LiteralPath "$($script:PageDrive)\")) {
+        Write-Log "Диска $($script:PageDrive) нет, файл подкачки не настроен"
+        return
+    }
+    $filter = Get-UwfFilter
+    if ($filter -and (Test-NextProtected $script:PageDrive)) {
+        & $script:Uwfmgr volume unprotect $script:PageDrive | Out-Null
+        Write-Log "Диск $($script:PageDrive) снят с защиты UWF"
+    }
+    $wanted = "$($script:PageDrive)\pagefile.sys $($script:PageFileMB) $($script:PageFileMB)"
+    $current = @((Get-ItemProperty -Path $script:MemoryKey -Name PagingFiles -ErrorAction SilentlyContinue).PagingFiles | Where-Object { $_ })
+    if ($current.Count -eq 1 -and $current[0] -eq $wanted) { return }
+    # Явная запись размера заодно выключает «Автоматически выбирать объём файла подкачки»
+    Set-ItemProperty -Path $script:MemoryKey -Name PagingFiles -Type MultiString -Value @($wanted)
+    # При включённой защите запись ушла бы в оверлей и пропала после перезагрузки, поэтому фиксируем её
+    if ($filter -and $filter.CurrentEnabled) {
+        & $script:Uwfmgr registry commit 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' PagingFiles | Out-Null
+    }
+    Write-Log "Файл подкачки прописан: $wanted (было: $($current -join '; ')). Заработает после перезагрузки"
+}
+
 function Set-Uwf([bool]$Enable) {
     if (-not (Get-UwfFilter)) { throw 'UWF на этом компьютере нет.' }
+    if ($Enable) {
+        # Как в UWF-Panel: Z: без защиты, файл подкачки на Z:, системный диск под защитой
+        Set-PageFileOnZ
+        if (-not (Test-NextProtected $env:SystemDrive)) {
+            & $script:Uwfmgr volume protect $env:SystemDrive | Out-Null
+            Write-Log "Диск $env:SystemDrive поставлен под защиту UWF"
+        }
+    }
     & $script:Uwfmgr filter $(if ($Enable) { 'enable' } else { 'disable' }) | Out-Null
     if ([bool](Get-UwfFilter).NextEnabled -ne $Enable) { throw 'Защита UWF не переключилась.' }
     Write-Log "UWF после перезагрузки: $(if ($Enable) { 'включён' } else { 'выключен' })"
@@ -321,6 +366,9 @@ function Invoke-Request($Request) {
 # ---------- Запуск ----------
 
 Write-Log "Служба запущена, версия $(Get-InstalledVersion)"
+
+try { Set-PageFileOnZ }
+catch { Write-Log "Ошибка настройки файла подкачки: $_" }
 
 # Продолжаем обновление, начатое до перезагрузки
 try {
