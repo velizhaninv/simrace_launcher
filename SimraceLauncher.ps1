@@ -1288,15 +1288,16 @@ function Update-NetStatusCheck {
 
     switch ($parts[0]) {
         # Разъём сетевого кабеля: корпус, три контакта и провод
-        'ethernet' { $data = 'M6,3.5 H18 V13.5 H15 V16.5 H9 V13.5 H6 Z M9.5,6.5 V9 M12,6.5 V9 M14.5,6.5 V9 M12,16.5 V21'; $name = 'Подключено по кабелю' }
+        'ethernet' { $data = 'M4,6 H20 V16 H16 V19.5 H8 V16 H4 Z M8,9.5 V12 M11,9.5 V12 M13,9.5 V12 M16,9.5 V12'; $name = 'Подключено по кабелю'; $short = 'Кабель' }
         # Три дуги Wi-Fi и точка
-        'wifi' { $data = 'M2.5,9 C7.8,4 16.2,4 21.5,9 M5.8,12.4 C9.4,9.2 14.6,9.2 18.2,12.4 M9.1,15.8 C10.8,14.4 13.2,14.4 14.9,15.8 M11.2,19.5 A0.8,0.8 0 1 1 12.8,19.5 A0.8,0.8 0 1 1 11.2,19.5'; $name = 'Подключено по Wi-Fi' }
-        default { $data = 'M4,4 L20,20 M20,4 L4,20'; $name = 'Нет подключения' }
+        'wifi' { $data = 'M2.5,9 C7.8,4 16.2,4 21.5,9 M5.8,12.4 C9.4,9.2 14.6,9.2 18.2,12.4 M9.1,15.8 C10.8,14.4 13.2,14.4 14.9,15.8 M11.2,19.5 A0.8,0.8 0 1 1 12.8,19.5 A0.8,0.8 0 1 1 11.2,19.5'; $name = 'Подключено по Wi-Fi'; $short = 'Wi-Fi' }
+        default { $data = 'M5,5 L19,19 M19,5 L5,19'; $name = 'Нет подключения'; $short = 'Нет сети' }
     }
     $IconNet.Data = [System.Windows.Media.Geometry]::Parse($data)
     $hasInternet = $parts[1] -eq 'True'
     $IconNet.Stroke = New-DeviceBrush $(if ($parts[0] -eq 'none') { '#E5301A' } elseif ($hasInternet) { '#FFFFFF' } else { '#E9C62A' })
     $NetBox.ToolTip = $(if ($parts[0] -ne 'none' -and -not $hasInternet) { "$name, но интернета нет" } else { $name })
+    $TxtNet.Text = $short
 
     $colors = @{ on = '#37C552'; idle = '#A2A6AB'; off = '#E5301A' }
     if ($script:StatusLamps['radmin']) { $script:StatusLamps['radmin'].Fill = New-DeviceBrush $colors[$parts[2]] }
@@ -3913,10 +3914,11 @@ function Submit-Decision([bool]$Lock) {
           <ControlTemplate TargetType="Button">
             <Border x:Name="Pill" Background="#C70D0E10" BorderBrush="#59FFFFFF" BorderThickness="1" CornerRadius="15" Padding="8,5,13,5">
               <StackPanel Orientation="Horizontal">
-                <Grid Width="18" Height="18" VerticalAlignment="Center">
-                  <Ellipse x:Name="Ring" Stroke="#E2450F" StrokeThickness="1.6"/>
-                  <TextBlock Text="i" FontSize="12" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Grid>
+                <Canvas Width="18" Height="18" VerticalAlignment="Center">
+                  <Ellipse x:Name="Ring" Width="18" Height="18" Stroke="#E2450F" StrokeThickness="1.6"/>
+                  <Ellipse Canvas.Left="7.9" Canvas.Top="4.1" Width="2.2" Height="2.2" Fill="White"/>
+                  <Path Data="M9,8.2 V13.4" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                </Canvas>
                 <TextBlock Text="Об игре" FontSize="14" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" Margin="7,0,0,1"/>
               </StackPanel>
             </Border>
@@ -4073,9 +4075,12 @@ function Submit-Decision([bool]$Lock) {
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <Button x:Name="BtnStatusLang" Style="{StaticResource StatusButton}" FontSize="18" MinWidth="50" ToolTip="Язык ввода, нажми, чтобы сменить"/>
             <Border x:Name="NetBox" Padding="8,0" VerticalAlignment="Center" Background="Transparent" ToolTip="Подключение к сети">
-              <Canvas Width="24" Height="24">
-                <Path x:Name="IconNet" Stroke="#6C6F73" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M4,4 L20,20 M20,4 L4,20"/>
-              </Canvas>
+              <StackPanel Orientation="Horizontal">
+                <Canvas Width="24" Height="24" VerticalAlignment="Center">
+                  <Path x:Name="IconNet" Stroke="#6C6F73" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M4,4 L20,20 M20,4 L4,20"/>
+                </Canvas>
+                <TextBlock x:Name="TxtNet" Text="Сеть" FontSize="15" Foreground="#A2A6AB" VerticalAlignment="Center" Margin="7,0,0,0"/>
+              </StackPanel>
             </Border>
             <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="6,0"/>
             <StackPanel x:Name="StatusLinks" Orientation="Horizontal"/>
@@ -4700,7 +4705,7 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'BtnAdminFleet', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'SystemMenu', 'LampSysUwf', 'TxtSysUwf', 'BarSysOverlay', 'TxtSysOverlay', 'LampSysPage', 'TxtSysPage', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'TxtNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'BtnAdminFleet', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'SystemMenu', 'LampSysUwf', 'TxtSysUwf', 'BarSysOverlay', 'TxtSysOverlay', 'LampSysPage', 'TxtSysPage', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
