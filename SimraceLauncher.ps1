@@ -4004,6 +4004,9 @@ function Submit-Decision([bool]$Lock) {
   <Grid>
     <Image x:Name="BackgroundImage" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
+    <!-- Версия лаунчера: мелко в левом нижнем углу -->
+    <TextBlock x:Name="TxtVersion" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="18,0,0,10" FontSize="12" Foreground="#6C6F73" IsHitTestVisible="False"/>
+
     <!-- Номер кокпита: плашка у верхнего края экрана по центру, как вырез. Номер берётся из имени компьютера -->
     <Border x:Name="PcBadge" HorizontalAlignment="Center" VerticalAlignment="Top" Background="#E61C1E21" BorderBrush="#3A3D42" BorderThickness="1,0,1,1"
             CornerRadius="0,0,18,18" Padding="30,5,30,8" MinWidth="128">
@@ -4707,7 +4710,7 @@ try {
     $script:GearButton = $null
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-    foreach ($name in 'BackgroundImage', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
+    foreach ($name in 'BackgroundImage', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
@@ -4743,6 +4746,7 @@ try {
     Initialize-DashPower
 
     $TxtComputer.Text = $env:COMPUTERNAME
+    $TxtVersion.Text = $(if ($script:LauncherVersion) { "SIMRACE Launcher $($script:LauncherVersion)" } else { '' })
     # SIMRACE-14 → № 14. Если в имени нет номера, показываем имя целиком
     $pcNumber = [regex]::Match($env:COMPUTERNAME, '(\d+)$')
     $RunPcNumber.Text = ' ' + $(if ($pcNumber.Success) { [int]$pcNumber.Value } else { $env:COMPUTERNAME })
