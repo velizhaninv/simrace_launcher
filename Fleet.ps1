@@ -179,7 +179,7 @@ foreach ($name in $script:Names) {
     $check.LayoutTransform = New-Object System.Windows.Media.ScaleTransform(1.3, 1.3)
     [void]$grid.Children.Add($check)
     $row = [pscustomobject]@{
-        Name = $name; Check = $check; Online = $false; Version = ''; Busy = $false; State = ''; BusyText = '
+        Name = $name; Check = $check; Online = $false; Version = ''; Busy = $false; State = ''; BusyText = ''
         Link = (New-Cell $grid 2 '...' '#A2A6AB')
         Ver = (New-Cell $grid 3 '')
         Uwf = (New-Cell $grid 4 '')
