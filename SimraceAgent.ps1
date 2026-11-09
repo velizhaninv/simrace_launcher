@@ -194,18 +194,31 @@ function Set-PageFileOnZ {
     Write-Log "Файл подкачки прописан: $wanted (было: $($current -join '; ')). Заработает после перезагрузки"
 }
 
+# Включение и выключение защиты: те же шаги и проверки, что в UWF-Panel
 function Set-Uwf([bool]$Enable) {
-    if (-not (Get-UwfFilter)) { throw 'UWF на этом компьютере нет.' }
+    $filter = Get-UwfFilter
+    if (-not $filter) { throw 'UWF на этом компьютере нет.' }
+    $page = "$($script:PageDrive)\"
     if ($Enable) {
-        # Как в UWF-Panel: Z: без защиты, файл подкачки на Z:, системный диск под защитой
-        Set-PageFileOnZ
-        if (-not (Test-NextProtected $env:SystemDrive)) {
-            & $script:Uwfmgr volume protect $env:SystemDrive | Out-Null
-            Write-Log "Диск $env:SystemDrive поставлен под защиту UWF"
+        # 1. Диск подкачки без защиты
+        if ((Test-Path -LiteralPath $page) -and (Test-NextProtected $script:PageDrive)) { & $script:Uwfmgr volume unprotect $script:PageDrive | Out-Null }
+        # 2. Системный диск под защиту
+        if (-not (Test-NextProtected $env:SystemDrive)) { & $script:Uwfmgr volume protect $env:SystemDrive | Out-Null }
+        # 3. Включить фильтр со следующей загрузки
+        & $script:Uwfmgr filter enable | Out-Null
+        # 4. Заново прописать подкачку, только пока защита в текущей сессии выключена: иначе запись уйдёт в оверлей
+        if (-not $filter.CurrentEnabled -and (Test-Path -LiteralPath $page)) {
+            Set-ItemProperty -Path $script:MemoryKey -Name PagingFiles -Type MultiString -Value @("$($script:PageDrive)\pagefile.sys $($script:PageFileMB) $($script:PageFileMB)")
         }
+        # Проверка результата
+        $ok = (Get-UwfFilter).NextEnabled -and (Test-NextProtected $env:SystemDrive)
+        if (Test-Path -LiteralPath $page) { $ok = $ok -and -not (Test-NextProtected $script:PageDrive) }
+        if (-not $ok) { throw 'Не удалось включить защиту: проверь UWF на этом компьютере.' }
     }
-    & $script:Uwfmgr filter $(if ($Enable) { 'enable' } else { 'disable' }) | Out-Null
-    if ([bool](Get-UwfFilter).NextEnabled -ne $Enable) { throw 'Защита UWF не переключилась.' }
+    else {
+        & $script:Uwfmgr filter disable | Out-Null
+        if ((Get-UwfFilter).NextEnabled) { throw 'Не удалось выключить защиту.' }
+    }
     Write-Log "UWF после перезагрузки: $(if ($Enable) { 'включён' } else { 'выключен' })"
 }
 
