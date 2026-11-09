@@ -18,6 +18,14 @@ $script:TokenUntil = [datetime]::MinValue
 $script:UpdateProcess = $null
 $script:UpdateOk = $true
 $script:OverlayNext = [datetime]::MinValue
+$script:Utf8 = New-Object System.Text.UTF8Encoding($false)
+$script:Listener = $null
+$script:NetPort = 47615
+$script:RemoteUpdate = $false
+$script:RemoteRelock = $false
+$script:LauncherBusy = $false
+$script:LauncherSeen = [datetime]::MinValue
+$script:IdleNext = [datetime]::MinValue
 $script:OverlayData = @{ ok = $true; enabled = $false; usedMb = 0; freeMb = 0 }
 
 $logFolder = if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\Logs' } else { Join-Path $env:ProgramData 'SIMRACE\Logs' }
@@ -262,6 +270,8 @@ function Update-OverlayCache {
 # Вызывается раз в секунду, пока никто не подключён
 function Update-AgentState {
     Update-OverlayCache
+    Update-Network
+    Update-WaitingUpdate
     if ($script:State -ne 'updating' -or -not $script:UpdateProcess -or -not $script:UpdateProcess.HasExited) { return }
     $code = $script:UpdateProcess.ExitCode
     $script:UpdateProcess = $null
@@ -272,7 +282,131 @@ function Update-AgentState {
     if ($code -eq 0) { $script:Message = "Лаунчер обновлён. $text".Trim() }
     else { $script:Message = "Обновить не удалось. Прежняя версия осталась. $text".Trim() }
     Write-Log "Обновление завершено, код $code. $text"
+    if ($script:RemoteUpdate) {
+        # Обновление с администраторского компьютера: без вопросов возвращаем защиту, как была
+        $script:RemoteUpdate = $false
+        if ($script:RemoteRelock) {
+            $script:RemoteRelock = $false
+            try {
+                Set-Uwf $true
+                $script:State = 'rebooting'
+                Restart-Pc
+                return
+            }
+            catch {
+                $script:UpdateOk = $false
+                $script:Message = "Защита не включилась после обновления: $($_.Exception.Message)"
+                Write-Log $script:Message
+            }
+        }
+        Request-LauncherRestart
+        $script:State = 'idle'
+        return
+    }
     $script:State = 'await-decision'
+}
+
+# ---------- Обновление по команде с администраторского компьютера ----------
+
+# Лаунчер сам перезапустится, когда закончится сеанс
+function Request-LauncherRestart {
+    try { Set-Content -LiteralPath (Join-Path $script:Root 'restart-request.txt') -Value (Get-Date -Format o) -Encoding ASCII }
+    catch { Write-Log "Запрос перезапуска лаунчера не записан: $_" }
+}
+
+# Запущенная игра: процессы из папок Steam и iRacing
+function Get-RunningGame {
+    try {
+        return (@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ExecutablePath -match '(?i)\\steamapps\\common\\|\\iRacingSim' } |
+            ForEach-Object { $_.Name -replace '\.exe$', '' } | Sort-Object -Unique) -join ', ')
+    }
+    catch { return '' }
+}
+
+# Чем занят кокпит. Пустая строка: свободен.
+function Get-BusyReason {
+    if ($script:LauncherBusy -and ((Get-Date) - $script:LauncherSeen).TotalSeconds -lt 15) { return 'идёт сеанс' }
+    $game = Get-RunningGame
+    if ($game) { return "игра: $game" }
+    return ''
+}
+
+function Update-WaitingUpdate {
+    if ($script:State -ne 'waiting-idle' -or (Get-Date) -lt $script:IdleNext) { return }
+    $script:IdleNext = (Get-Date).AddSeconds(30)
+    $busy = Get-BusyReason
+    if ($busy) { return }
+    Write-Log 'Обновление по сети: кокпит свободен, начинаю'
+    $filter = Get-UwfFilter
+    if ($filter -and $filter.CurrentEnabled) {
+        Set-Pending 'remote-relock'
+        try { Set-Uwf $false }
+        catch {
+            Set-Pending ''
+            $script:State = 'idle'
+            $script:UpdateOk = $false
+            $script:Message = "Обновление по сети не выполнено: $($_.Exception.Message)"
+            Write-Log $script:Message
+            return
+        }
+        $script:State = 'rebooting'
+        Restart-Pc
+        return
+    }
+    $script:RemoteUpdate = $true
+    $script:RemoteRelock = $false
+    $script:State = 'idle'
+    Start-Update
+}
+
+# Подключения из локальной сети: только состояние и запуск обновления, без пароля.
+# Обновление ставит официальную версию с GitHub и ждёт, пока кокпит освободится.
+function Update-Network {
+    if (-not $script:Listener) { return }
+    while ($script:Listener.Pending()) {
+        $client = $script:Listener.AcceptTcpClient()
+        try {
+            $client.ReceiveTimeout = 3000
+            $client.SendTimeout = 3000
+            $stream = $client.GetStream()
+            $reader = New-Object System.IO.StreamReader($stream, $script:Utf8, $false, 4096, $true)
+            $writer = New-Object System.IO.StreamWriter($stream, $script:Utf8, 4096, $true)
+            $writer.AutoFlush = $true
+            $line = $reader.ReadLine()
+            $response = $null
+            try { $response = Invoke-NetRequest ($line | ConvertFrom-Json) }
+            catch { $response = @{ ok = $false; error = $_.Exception.Message } }
+            $writer.WriteLine(($response | ConvertTo-Json -Compress -Depth 4))
+        }
+        catch { Write-Log "Ошибка сетевой команды: $_" }
+        finally { $client.Close() }
+    }
+}
+
+function Invoke-NetRequest($Request) {
+    switch ([string]$Request.action) {
+        'status' {
+            $filter = Get-UwfFilter
+            $data = $script:OverlayData
+            return @{
+                ok = $true; computer = $env:COMPUTERNAME; version = Get-InstalledVersion; state = $script:State
+                message = $script:Message; updateOk = $script:UpdateOk
+                uwfNow = [bool]($filter -and $filter.CurrentEnabled); uwfNext = [bool]($filter -and $filter.NextEnabled)
+                usedMb = $data.usedMb; freeMb = $data.freeMb; pages = @($data.pages); busy = Get-BusyReason
+            }
+        }
+        'update' {
+            if ($script:State -eq 'idle') {
+                $script:State = 'waiting-idle'
+                $script:IdleNext = [datetime]::MinValue
+                $script:Message = ''
+                $script:UpdateOk = $true
+                Write-Log 'Обновление по сети: команда получена'
+            }
+            return @{ ok = $true; state = $script:State }
+        }
+        default { throw 'Неизвестная команда.' }
+    }
 }
 
 # ---------- Команды ----------
@@ -291,6 +425,11 @@ function Test-Token($Request) {
 function Invoke-Request($Request) {
     switch ([string]$Request.action) {
         'status' {
+            # Лаунчер сообщает, идёт ли сеанс: обновление по сети его дождётся
+            if ($Request.PSObject.Properties['session']) {
+                $script:LauncherBusy = [bool]$Request.session
+                $script:LauncherSeen = Get-Date
+            }
             $filter = Get-UwfFilter
             return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion }
         }
@@ -358,7 +497,7 @@ function Invoke-Request($Request) {
         'open' {
             Test-Token $Request
             $name = [string]$Request.file
-            if ('UwfPanel.ps1', 'LauncherSettings.ps1', 'taskmgr' -notcontains $name) { throw 'Неизвестное окно.' }
+            if ('UwfPanel.ps1', 'LauncherSettings.ps1', 'Fleet.ps1', 'taskmgr' -notcontains $name) { throw 'Неизвестное окно.' }
             $powershell = Join-Path $PSHOME 'powershell.exe'
             $command = if ($name -eq 'taskmgr') { "`"$(Join-Path $env:SystemRoot 'System32\Taskmgr.exe')`"" } else { "`"$powershell`" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $script:Root $name)`"" }
             $code = [SimraceAgentNative]::StartOnConsole($command, $script:Root)
@@ -389,9 +528,34 @@ Write-Log "Служба запущена, версия $(Get-InstalledVersion)"
 try { Set-PageFileOnZ }
 catch { Write-Log "Ошибка настройки файла подкачки: $_" }
 
+# Сетевые команды из локальной сети
+try {
+    $script:Listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Any, $script:NetPort)
+    $script:Listener.Start()
+}
+catch {
+    $script:Listener = $null
+    Write-Log "Сетевые команды недоступны: $_"
+}
+
 # Продолжаем обновление, начатое до перезагрузки
 try {
-    if ((Get-Pending) -eq 'update') {
+    $pending = Get-Pending
+    if ($pending -eq 'remote-relock') {
+        Set-Pending ''
+        $filter = Get-UwfFilter
+        if ($filter -and $filter.CurrentEnabled) {
+            $script:UpdateOk = $false
+            $script:Message = 'Обновление по сети не выполнено: защита UWF не выключилась.'
+            Write-Log $script:Message
+        }
+        else {
+            $script:RemoteUpdate = $true
+            $script:RemoteRelock = $true
+            Start-Update
+        }
+    }
+    if ($pending -eq 'update') {
         Set-Pending ''
         $filter = Get-UwfFilter
         if ($filter -and $filter.CurrentEnabled) {

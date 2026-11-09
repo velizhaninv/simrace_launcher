@@ -3330,7 +3330,7 @@ function Close-Launcher([int]$Code) {
 # ---------- Опрос службы в фоне: окно не ждёт её ответа ----------
 
 function Start-AgentPoller {
-    $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false })
+    $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false; Busy = $false })
     $ps = [powershell]::Create()
     [void]$ps.AddScript({
         param($Shared)
@@ -3350,7 +3350,7 @@ function Start-AgentPoller {
         }
         $tick = 0
         while (-not $Shared.Stop) {
-            $Shared.Status = Send-Line '{"action":"status"}'
+            $Shared.Status = Send-Line $(if ($Shared.Busy) { '{"action":"status","session":true}' } else { '{"action":"status","session":false}' })
             if ($tick % 5 -eq 0) { $Shared.Overlay = Send-Line '{"action":"overlay"}' }
             $tick++
             Start-Sleep -Seconds 2
@@ -4352,6 +4352,8 @@ function Submit-Decision([bool]$Lock) {
               <Button x:Name="BtnExit" Grid.Column="4" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Закрыть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/><Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Закрыть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
             </Grid>
 
+            <Button x:Name="BtnAdminFleet" Style="{StaticResource AdminTile}" Margin="0,10,0,0" Visibility="Collapsed"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="2" Canvas.Top="4" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="14" Canvas.Top="4" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="2" Canvas.Top="14" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="14" Canvas.Top="14" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Кокпиты клуба: состояние и обновление" VerticalAlignment="Center" Margin="12,0,0,0"/></StackPanel></Button>
+
             <TextBlock Text="КОМПЬЮТЕР" Style="{StaticResource AdminGroup}"/>
             <UniformGrid Columns="3" Margin="-5,0">
               <Button x:Name="BtnAdminTaskMgr" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="3" Canvas.Top="4" Width="18" Height="16" RadiusX="3" RadiusY="3" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6,13 H9 L11,9 L13,16 L15,13 H18" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Диспетчер задач" VerticalAlignment="Center" Margin="12,0,0,0"/></StackPanel></Button>
@@ -4582,7 +4584,7 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'SystemMenu', 'LampSysUwf', 'TxtSysUwf', 'BarSysOverlay', 'TxtSysOverlay', 'LampSysPage', 'TxtSysPage', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'BtnAdminFleet', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'SystemMenu', 'LampSysUwf', 'TxtSysUwf', 'BarSysOverlay', 'TxtSysOverlay', 'LampSysPage', 'TxtSysPage', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
@@ -4718,6 +4720,9 @@ try {
     $BtnAdminLogin.Add_Click({ Submit-AdminLogin })
     $BtnRestartLauncher.Add_Click({ Close-Launcher 2 })
     $BtnAdminTaskMgr.Add_Click({ Open-TaskManager })
+    $BtnAdminFleet.Add_Click({ Open-AdminWindow 'Fleet.ps1' 'Кокпиты SIMRACE' })
+    # Управление кокпитами клуба есть только на администраторском компьютере SIMRACE-14
+    if ($env:COMPUTERNAME -match '(?i)-14$') { $BtnAdminFleet.Visibility = 'Visible' }
     $BtnAdminUpdate.Add_Click({ Request-AdminUpdate })
     $BtnAdminUwf.Add_Click({ Request-AdminUwf })
     $BtnAdminShutdown.Add_Click({ Show-AdminConfirm 'shutdown' 'Выключить ПК' 'Компьютер выключится. Включить его обратно можно только кнопкой на корпусе.' 'Выключить' })
@@ -4836,6 +4841,8 @@ try {
             Update-Fact
             if ($script:TickCount % 20 -eq 1) { Update-OverlayGauge }
             if ($script:TickCount % 4 -eq 2) { Test-RestartRequest }
+            # Для обновления по сети: служба дождётся конца сеанса и игры
+            if ($script:AgentShared) { $script:AgentShared.Busy = [bool]($script:Session -or $script:TimerState -ne 'idle') }
             if ($script:TickCount % 6 -eq 0) {
                 Update-AgentStatus
                 Update-LockStatus
