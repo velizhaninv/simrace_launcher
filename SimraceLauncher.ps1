@@ -2574,6 +2574,10 @@ function New-Tile($App) {
     [void]$item.Children.Add($button)
     # Правая кнопка мыши: дополнительное действие плитки, например запуск сервера
     if ($App.Extra) {
+        # Подсказка при наведении, чтобы гость знал о второй функции плитки
+        $button.ToolTip = "Правая кнопка мыши: $($App.Extra.Name.ToLower())"
+        [System.Windows.Controls.ToolTipService]::SetInitialShowDelay($button, 500)
+        [System.Windows.Controls.ToolTipService]::SetPlacement($button, [System.Windows.Controls.Primitives.PlacementMode]::Mouse)
         $button.Add_MouseRightButtonUp({
             param($sender, $e)
             $e.Handled = $true
@@ -3502,6 +3506,19 @@ function Submit-Decision([bool]$Lock) {
         ShowInTaskbar="True" Background="#0E0F11" Foreground="White"
         FontFamily="Segoe UI Variable Display, Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True">
   <Window.Resources>
+        <Style TargetType="ToolTip">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="#F2141518" BorderBrush="#E2450F" BorderThickness="1" CornerRadius="8" Padding="12,7">
+                            <ContentPresenter/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     <SolidColorBrush x:Key="Accent" Color="#E2450F"/>
     <SolidColorBrush x:Key="LogoColor" Color="#C82F03"/>
     <SolidColorBrush x:Key="Muted" Color="#A2A6AB"/>
