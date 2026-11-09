@@ -26,6 +26,8 @@ $script:RemoteRelock = $false
 $script:LauncherBusy = $false
 $script:LauncherSeen = [datetime]::MinValue
 $script:IdleNext = [datetime]::MinValue
+$script:ForceUpdate = $false
+$script:LastBusy = ''
 $script:OverlayData = @{ ok = $true; enabled = $false; usedMb = 0; freeMb = 0 }
 
 $logFolder = if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\Logs' } else { Join-Path $env:ProgramData 'SIMRACE\Logs' }
@@ -365,8 +367,14 @@ function Get-BusyReason {
 function Update-WaitingUpdate {
     if ($script:State -ne 'waiting-idle' -or (Get-Date) -lt $script:IdleNext) { return }
     $script:IdleNext = (Get-Date).AddSeconds(30)
-    $busy = Get-BusyReason
-    if ($busy) { return }
+    $busy = $(if ($script:ForceUpdate) { '' } else { Get-BusyReason })
+    if ($busy) {
+        # Причину ожидания пишем в журнал один раз, при её смене
+        if ($busy -ne $script:LastBusy) { Write-Log "Обновление по сети ждёт: $busy" }
+        $script:LastBusy = $busy
+        return
+    }
+    $script:ForceUpdate = $false
     Write-Log 'Обновление по сети: кокпит свободен, начинаю'
     $filter = Get-UwfFilter
     if ($filter -and $filter.CurrentEnabled) {
@@ -432,7 +440,14 @@ function Invoke-NetRequest($Request) {
                 $script:IdleNext = [datetime]::MinValue
                 $script:Message = ''
                 $script:UpdateOk = $true
+                $script:LastBusy = ''
                 Write-Log 'Обновление по сети: команда получена'
+            }
+            # Администратор решил не ждать: обновляемся при следующей проверке, даже если кокпит занят
+            if ($Request.force -and $script:State -eq 'waiting-idle') {
+                $script:ForceUpdate = $true
+                $script:IdleNext = [datetime]::MinValue
+                Write-Log 'Обновление по сети: без ожидания конца сеанса'
             }
             return @{ ok = $true; state = $script:State }
         }

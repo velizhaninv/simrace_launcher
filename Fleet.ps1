@@ -13,7 +13,7 @@ $script:VersionUrl = 'https://raw.githubusercontent.com/velizhaninv/simrace_laun
 
 # Опрос в фоне: подключается ко всем кокпитам сразу, ждёт не дольше 2,5 секунды
 $script:QueryScript = {
-    param($Names, $Port, $Line, $VersionUrl)
+    param($Names, $Port, $Line, $VersionUrl, $Lines)
     $encoding = New-Object System.Text.UTF8Encoding($false)
     $items = foreach ($name in $Names) {
         $client = New-Object System.Net.Sockets.TcpClient
@@ -37,7 +37,8 @@ $script:QueryScript = {
                 $stream.WriteTimeout = 3000
                 $writer = New-Object System.IO.StreamWriter($stream, $encoding, 4096, $true)
                 $writer.AutoFlush = $true
-                $writer.WriteLine($Line)
+                # Своя команда для отдельного кокпита, если задана
+                $writer.WriteLine($(if ($Lines -and $Lines.ContainsKey($item.Name)) { $Lines[$item.Name] } else { $Line }))
                 $reader = New-Object System.IO.StreamReader($stream, $encoding, $false, 4096, $true)
                 $answer = $reader.ReadLine()
             }
@@ -178,7 +179,7 @@ foreach ($name in $script:Names) {
     $check.LayoutTransform = New-Object System.Windows.Media.ScaleTransform(1.3, 1.3)
     [void]$grid.Children.Add($check)
     $row = [pscustomobject]@{
-        Name = $name; Check = $check; Online = $false; Version = ''; Busy = $false
+        Name = $name; Check = $check; Online = $false; Version = ''; Busy = $false; State = ''; BusyText = '
         Link = (New-Cell $grid 2 '...' '#A2A6AB')
         Ver = (New-Cell $grid 3 '')
         Uwf = (New-Cell $grid 4 '')
@@ -241,8 +242,10 @@ function Show-Result($Row, $Answer, [string]$Latest) {
     }
 
     $Row.Busy = [bool]$data.busy
+    $Row.State = [string]$data.state
+    $Row.BusyText = [string]$data.busy
     $text = switch ([string]$data.state) {
-        'waiting-idle' { 'обновится после сеанса' }
+        'waiting-idle' { $(if ($data.busy) { "ждёт: $($data.busy)" } else { 'обновится после сеанса' }) }
         'updating' { 'обновляется' }
         'rebooting' { 'перезагружается' }
         'await-decision' { 'ждёт ответа на экране' }
@@ -263,10 +266,10 @@ function Show-Result($Row, $Answer, [string]$Latest) {
 $script:Running = $null
 $script:Latest = ''
 
-function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scriptblock]$Done) {
+function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scriptblock]$Done, [hashtable]$Lines = @{}) {
     if ($script:Running) { return $false }
     $ps = [powershell]::Create()
-    [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' }))
+    [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
     $BtnRefresh.IsEnabled = $false
     $BtnUpdate.IsEnabled = $false
@@ -302,10 +305,26 @@ function Start-RemoteUpdate {
         $TxtStatus.Text = 'Отметь кокпиты галочками.'
         return
     }
-    $busy = @($selected | Where-Object { $script:RowMap[$_].Busy })
-    $question = "Обновить лаунчер на: $($selected -join ', ')?`n`nЗащита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся."
-    if ($busy.Count -gt 0) { $question += "`n`nСейчас заняты: $($busy -join ', '). Они обновятся, когда закончится сеанс." }
-    if ([System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNo', 'Question') -ne 'Yes') { return }
+    $lines = @{}
+    $waiting = @($selected | Where-Object { $script:RowMap[$_].State -eq 'waiting-idle' })
+    if ($waiting.Count -gt 0) {
+        # Кокпит уже ждёт конца сеанса: можно обновить сразу. Идущая игра закроется при перезагрузке.
+        $reasons = @($waiting | ForEach-Object { $text = $script:RowMap[$_].BusyText; "$_" + $(if ($text) { " ($text)" } else { '' }) }) -join "`n"
+        $question = "Эти кокпиты уже ждут конца сеанса:`n$reasons`n`nОбновить их сразу, не дожидаясь? Если там идёт игра, она закроется при перезагрузке."
+        $answer = [System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNoCancel', 'Warning')
+        if ($answer -eq 'Cancel') { return }
+        if ($answer -eq 'Yes') { foreach ($name in $waiting) { $lines[$name] = '{"action":"update","force":true}' } }
+        $selected = @($selected | Where-Object { $waiting -notcontains $_ -or $lines.ContainsKey($_) })
+        if ($selected.Count -eq 0) { return }
+    }
+    $fresh = @($selected | Where-Object { -not $lines.ContainsKey($_) })
+    if ($fresh.Count -gt 0) {
+        $busy = @($fresh | Where-Object { $script:RowMap[$_].Busy })
+        $question = "Обновить лаунчер на: $($fresh -join ', ')?`n`nЗащита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся."
+        if ($busy.Count -gt 0) { $question += "`n`nСейчас заняты: $($busy -join ', '). Они обновятся, когда закончится сеанс." }
+        if ([System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNo', 'Question') -ne 'Yes') { $selected = @($selected | Where-Object { $lines.ContainsKey($_) }) }
+        if ($selected.Count -eq 0) { return }
+    }
     $started = Start-Query $selected '{"action":"update"}' $false {
         param($Output)
         $failed = @($Output.Results.Keys | Where-Object { -not $Output.Results[$_] } | Sort-Object)
@@ -313,7 +332,7 @@ function Start-RemoteUpdate {
         $script:StatusHold = (Get-Date).AddSeconds(30)
         foreach ($name in $Output.Results.Keys) { $script:RowMap[$name].Check.IsChecked = $false }
         $script:NextRefresh = (Get-Date).AddSeconds(3)
-    }
+    } $lines
     if (-not $started) { $TxtStatus.Text = 'Дождись окончания опроса и нажми ещё раз.' }
 }
 
