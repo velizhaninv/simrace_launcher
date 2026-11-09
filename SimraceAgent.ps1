@@ -185,20 +185,17 @@ function Set-PageFileOnZ {
         Write-Log "Диска $($script:PageDrive) нет, файл подкачки не настроен"
         return
     }
-    $filter = Get-UwfFilter
-    if ($filter -and (Test-NextProtected $script:PageDrive)) {
-        & $script:Uwfmgr volume unprotect $script:PageDrive | Out-Null
-        Write-Log "Диск $($script:PageDrive) снят с защиты UWF"
-    }
     $wanted = "$($script:PageDrive)\pagefile.sys $($script:PageFileMB) $($script:PageFileMB)"
     $current = @((Get-ItemProperty -Path $script:MemoryKey -Name PagingFiles -ErrorAction SilentlyContinue).PagingFiles | Where-Object { $_ })
     if ($current.Count -eq 1 -and $current[0] -eq $wanted) { return }
+    # Как в UWF-Panel: пишем только пока защита в текущей сессии выключена, иначе запись уйдёт в оверлей
+    $filter = Get-UwfFilter
+    if ($filter -and $filter.CurrentEnabled) {
+        Write-Log "Файл подкачки в реестре: $($current -join '; '). Защита включена, исправится при обслуживании с выключенной защитой"
+        return
+    }
     # Явная запись размера заодно выключает «Автоматически выбирать объём файла подкачки»
     Set-ItemProperty -Path $script:MemoryKey -Name PagingFiles -Type MultiString -Value @($wanted)
-    # При включённой защите запись ушла бы в оверлей и пропала после перезагрузки, поэтому фиксируем её
-    if ($filter -and $filter.CurrentEnabled) {
-        & $script:Uwfmgr registry commit 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' PagingFiles | Out-Null
-    }
     Write-Log "Файл подкачки прописан: $wanted (было: $($current -join '; ')). Заработает после перезагрузки"
 }
 

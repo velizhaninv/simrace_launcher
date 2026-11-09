@@ -235,6 +235,9 @@ foreach ($section in 'apps', 'utilities', 'categories') {
         elseif ($section -eq 'utilities') { $config.utilities = @(@($config.utilities) + $item) }
     }
 }
+# Версия 2026.11.09-5 отключала растягивание окна City Car Driving. Отменено: возвращаем как у остальных игр.
+$ccd = @($config.apps) | Where-Object { $_.id -eq 'city-car-driving-2' } | Select-Object -First 1
+if ($ccd -and $ccd.PSObject.Properties['forceFullscreen']) { $ccd.PSObject.Properties.Remove('forceFullscreen') }
 # Индикатор педалей повторяет базу: старые настройки с одной базой заменяем
 if (@($config.devices).Count -lt @($defaults.devices).Count) { $config.devices = $defaults.devices }
 # Новая раскладка плиток применяется один раз: категории и порядок из архива, свои игры остаются в конце
