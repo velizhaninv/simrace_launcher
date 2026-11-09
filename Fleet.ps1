@@ -105,16 +105,23 @@ $script:QueryScript = {
       <TextBlock x:Name="TxtLatest" DockPanel.Dock="Right" FontSize="16" Foreground="#A2A6AB" VerticalAlignment="Center"/>
       <TextBlock Text="Кокпиты SIMRACE" FontSize="30" FontWeight="SemiBold"/>
     </DockPanel>
-    <DockPanel DockPanel.Dock="Bottom" Margin="0,18,0,0">
-      <TextBlock x:Name="TxtStatus" DockPanel.Dock="Right" Foreground="#A2A6AB" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="560" TextAlignment="Right"/>
-      <StackPanel Orientation="Horizontal">
-        <Button x:Name="BtnUpdate" Content="Обновить выбранные" Style="{StaticResource Primary}"/>
-        <Button x:Name="BtnSelectOld" Content="Выбрать устаревшие" Style="{StaticResource Btn}"/>
-        <Button x:Name="BtnSelectAll" Content="Выбрать все" Style="{StaticResource Btn}"/>
-        <Button x:Name="BtnSelectNone" Content="Снять выбор" Style="{StaticResource Btn}"/>
-        <Button x:Name="BtnRefresh" Content="Обновить список" Style="{StaticResource Btn}"/>
-      </StackPanel>
-    </DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
+      <TextBlock x:Name="TxtStatus" Foreground="#A2A6AB" TextWrapping="Wrap" Margin="2,0,0,12"/>
+      <DockPanel>
+        <!-- Выбор кокпитов справа, команды слева -->
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button x:Name="BtnSelectOld" Content="Устаревшие" Style="{StaticResource Btn}"/>
+          <Button x:Name="BtnSelectAll" Content="Все" Style="{StaticResource Btn}"/>
+          <Button x:Name="BtnSelectNone" Content="Снять выбор" Style="{StaticResource Btn}"/>
+          <Button x:Name="BtnRefresh" Content="Обновить список" Style="{StaticResource Btn}" Margin="0"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal">
+          <Button x:Name="BtnUpdate" Content="Обновить лаунчер" Style="{StaticResource Primary}"/>
+          <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
+          <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
+        </StackPanel>
+      </DockPanel>
+    </StackPanel>
     <Border Background="#141518" BorderBrush="#2A2D31" BorderThickness="1" CornerRadius="14" Padding="10,6">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel x:Name="Rows"/>
@@ -124,7 +131,7 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnLock', 'BtnReboot', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
@@ -179,7 +186,7 @@ foreach ($name in $script:Names) {
     $check.LayoutTransform = New-Object System.Windows.Media.ScaleTransform(1.3, 1.3)
     [void]$grid.Children.Add($check)
     $row = [pscustomobject]@{
-        Name = $name; Check = $check; Online = $false; Version = ''; Busy = $false; State = ''; BusyText = ''
+        Name = $name; Check = $check; Online = $false; Version = ''; Busy = $false; State = ''; Pending = ''; BusyText = ''
         Link = (New-Cell $grid 2 '...' '#A2A6AB')
         Ver = (New-Cell $grid 3 '')
         Uwf = (New-Cell $grid 4 '')
@@ -243,9 +250,13 @@ function Show-Result($Row, $Answer, [string]$Latest) {
 
     $Row.Busy = [bool]$data.busy
     $Row.State = [string]$data.state
+    $Row.Pending = [string]$data.pending
     $Row.BusyText = [string]$data.busy
     $text = switch ([string]$data.state) {
-        'waiting-idle' { $(if ($data.busy) { "ждёт: $($data.busy)" } else { 'обновится после сеанса' }) }
+        'waiting-idle' {
+            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'reboot' { 'перезагрузится' } default { 'обновится' } })
+            $(if ($data.busy) { "$verb после сеанса ($($data.busy))" } else { "$verb через несколько секунд" })
+        }
         'updating' { 'обновляется' }
         'rebooting' { 'перезагружается' }
         'await-decision' { 'ждёт ответа на экране' }
@@ -271,8 +282,7 @@ function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scrip
     $ps = [powershell]::Create()
     [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
-    $BtnRefresh.IsEnabled = $false
-    $BtnUpdate.IsEnabled = $false
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnReboot) { $button.IsEnabled = $false }
     return $true
 }
 
@@ -280,8 +290,7 @@ function Update-Query {
     if (-not $script:Running -or -not $script:Running.Async.IsCompleted) { return }
     $job = $script:Running
     $script:Running = $null
-    $BtnRefresh.IsEnabled = $true
-    $BtnUpdate.IsEnabled = $true
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnReboot) { $button.IsEnabled = $true }
     $output = $null
     try { $output = @($job.Ps.EndInvoke($job.Async))[0] } catch { $TxtStatus.Text = "Ошибка опроса: $_" }
     $job.Ps.Dispose()
@@ -299,36 +308,61 @@ function Start-Refresh {
     })
 }
 
-function Start-RemoteUpdate {
+# Тексты для трёх команд: обновление, блокировка, перезагрузка
+$script:Commands = @{
+    update = @{ Verb = 'Обновить лаунчер на'; Now = 'Обновить их сразу'; Note = 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.'; Done = 'обновятся' }
+    lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
+    reboot = @{ Verb = 'Перезагрузить'; Now = 'Перезагрузить их сразу'; Note = 'Компьютеры перезагрузятся.'; Done = 'перезагрузятся' }
+}
+
+function Start-RemoteCommand([string]$Action) {
+    $text = $script:Commands[$Action]
     $selected = @($script:Names | Where-Object { $script:RowMap[$_].Check.IsChecked })
     if ($selected.Count -eq 0) {
         $TxtStatus.Text = 'Отметь кокпиты галочками.'
         return
     }
+    if ($Action -ne 'update' -and $env:COMPUTERNAME -ne 'SIMRACE-14') {
+        $TxtStatus.Text = 'Блокировать и перезагружать кокпиты можно только с SIMRACE-14.'
+        return
+    }
     $lines = @{}
-    $waiting = @($selected | Where-Object { $script:RowMap[$_].State -eq 'waiting-idle' })
+    $line = "{`"action`":`"$Action`"}"
+    $forceLine = "{`"action`":`"$Action`",`"force`":true}"
+    # Кокпит уже ждёт конца сеанса с этой же командой: можно выполнить сразу
+    $waiting = @($selected | Where-Object { $script:RowMap[$_].State -eq 'waiting-idle' -and $script:RowMap[$_].Pending -eq $Action })
     if ($waiting.Count -gt 0) {
-        # Кокпит уже ждёт конца сеанса: можно обновить сразу. Идущая игра закроется при перезагрузке.
-        $reasons = @($waiting | ForEach-Object { $text = $script:RowMap[$_].BusyText; "$_" + $(if ($text) { " ($text)" } else { '' }) }) -join "`n"
-        $question = "Эти кокпиты уже ждут конца сеанса:`n$reasons`n`nОбновить их сразу, не дожидаясь? Если там идёт игра, она закроется при перезагрузке."
+        $reasons = @($waiting | ForEach-Object { $busyText = $script:RowMap[$_].BusyText; "$_" + $(if ($busyText) { " ($busyText)" } else { '' }) }) -join "`n"
+        $question = "Эти кокпиты уже ждут конца сеанса:`n$reasons`n`n$($text.Now), не дожидаясь? Если там идёт игра, она закроется при перезагрузке."
         $answer = [System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNoCancel', 'Warning')
         if ($answer -eq 'Cancel') { return }
-        if ($answer -eq 'Yes') { foreach ($name in $waiting) { $lines[$name] = '{"action":"update","force":true}' } }
+        if ($answer -eq 'Yes') { foreach ($name in $waiting) { $lines[$name] = $forceLine } }
         $selected = @($selected | Where-Object { $waiting -notcontains $_ -or $lines.ContainsKey($_) })
         if ($selected.Count -eq 0) { return }
     }
     $fresh = @($selected | Where-Object { -not $lines.ContainsKey($_) })
     if ($fresh.Count -gt 0) {
         $busy = @($fresh | Where-Object { $script:RowMap[$_].Busy })
-        $question = "Обновить лаунчер на: $($fresh -join ', ')?`n`nЗащита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся."
-        if ($busy.Count -gt 0) { $question += "`n`nСейчас заняты: $($busy -join ', '). Они обновятся, когда закончится сеанс." }
+        $question = "$($text.Verb): $($fresh -join ', ')?`n`n$($text.Note)"
+        if ($busy.Count -gt 0) { $question += "`n`nСейчас заняты: $($busy -join ', '). Они $($text.Done), когда закончится сеанс." }
         if ([System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNo', 'Question') -ne 'Yes') { $selected = @($selected | Where-Object { $lines.ContainsKey($_) }) }
         if ($selected.Count -eq 0) { return }
     }
-    $started = Start-Query $selected '{"action":"update"}' $false {
+    $started = Start-Query $selected $line $false {
         param($Output)
-        $failed = @($Output.Results.Keys | Where-Object { -not $Output.Results[$_] } | Sort-Object)
-        $TxtStatus.Text = $(if ($failed.Count -gt 0) { "Команда отправлена. Не ответили: $($failed -join ', ')" } else { 'Команда отправлена. Ход обновления видно в столбце «Сейчас».' })
+        $silent = @()
+        $refused = @()
+        foreach ($name in ($Output.Results.Keys | Sort-Object)) {
+            $answer = $Output.Results[$name]
+            if (-not $answer) { $silent += $name; continue }
+            try { $data = $answer | ConvertFrom-Json } catch { $data = $null }
+            if (-not $data -or -not $data.ok) { $refused += "$name ($(if ($data) { $data.error } else { 'непонятный ответ' }))" }
+        }
+        $parts = @('Команда отправлена.')
+        if ($silent.Count -gt 0) { $parts += "Не ответили: $($silent -join ', ')." }
+        if ($refused.Count -gt 0) { $parts += "Отказ: $($refused -join '; ')." }
+        if ($silent.Count + $refused.Count -eq 0) { $parts += 'Ход выполнения видно в столбце «Сейчас».' }
+        $TxtStatus.Text = $parts -join ' '
         $script:StatusHold = (Get-Date).AddSeconds(30)
         foreach ($name in $Output.Results.Keys) { $script:RowMap[$name].Check.IsChecked = $false }
         $script:NextRefresh = (Get-Date).AddSeconds(3)
@@ -337,7 +371,9 @@ function Start-RemoteUpdate {
 }
 
 $BtnRefresh.Add_Click({ Start-Refresh })
-$BtnUpdate.Add_Click({ Start-RemoteUpdate })
+$BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
+$BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
+$BtnReboot.Add_Click({ Start-RemoteCommand 'reboot' })
 $BtnSelectAll.Add_Click({ foreach ($row in $script:RowMap.Values) { if ($row.Online) { $row.Check.IsChecked = $true } } })
 $BtnSelectNone.Add_Click({ foreach ($row in $script:RowMap.Values) { $row.Check.IsChecked = $false } })
 $BtnSelectOld.Add_Click({

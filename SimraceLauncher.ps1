@@ -1017,7 +1017,7 @@ function Find-Cover($App) {
 function Resolve-App($App) {
     if ($App.enabled -eq $false) { return $null }
     $watch = @($App.watch | Where-Object { $_ })
-    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; Info = [string]$App.info; LaunchTimeout = $App.launchTimeoutSeconds; Extra = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
+    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; Info = [string]$App.info; Wheels = @($App.wheels | Where-Object { $_ }); LaunchTimeout = $App.launchTimeoutSeconds; Extra = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
     if ($App.extra) {
         try { $common.Extra = Resolve-App $App.extra }
         catch { Write-Log "$($App.name): ошибка дополнительной кнопки: $_" }
@@ -2523,6 +2523,73 @@ function Hide-GameInfo {
     if ($script:LastTile) { [void]$script:LastTile.Focus() }
 }
 
+# Рекомендуемые рули на карточке игры: картинки wheel-<id>.png рядом с лаунчером
+$script:WheelNames = @{ nardi = @('NARDI', 'Nardi'); cs = @('CS', 'MOZA CS'); ks = @('KS', 'MOZA KS') }
+$script:WheelImages = @{}
+function Get-WheelImage([string]$Id) {
+    if ($script:WheelImages.ContainsKey($Id)) { return $script:WheelImages[$Id] }
+    $image = $null
+    $file = Join-Path $script:Root "wheel-$Id.png"
+    if (Test-Path -LiteralPath $file) {
+        try {
+            $image = New-Object System.Windows.Media.Imaging.BitmapImage
+            $image.BeginInit()
+            $image.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+            $image.UriSource = New-Object System.Uri($file)
+            $image.DecodePixelWidth = 96
+            $image.EndInit()
+            $image.Freeze()
+        }
+        catch {
+            Write-Log "Картинка руля $Id не загрузилась: $_"
+            $image = $null
+        }
+    }
+    $script:WheelImages[$Id] = $image
+    return $image
+}
+
+function New-WheelBadges($App) {
+    $panel = New-Object System.Windows.Controls.StackPanel
+    $panel.Orientation = 'Horizontal'
+    $panel.HorizontalAlignment = 'Left'
+    $panel.VerticalAlignment = 'Top'
+    $panel.Margin = New-Object System.Windows.Thickness(10, 8, 0, 0)
+    # Тень под рулями и подписями: читаются на любой обложке, без фоновой плашки
+    $shadow = New-Object System.Windows.Media.Effects.DropShadowEffect
+    $shadow.BlurRadius = 10
+    $shadow.ShadowDepth = 0
+    $shadow.Opacity = 0.9
+    $shadow.Color = [System.Windows.Media.Colors]::Black
+    $panel.Effect = $shadow
+    foreach ($id in @($App.Wheels)) {
+        $names = $script:WheelNames[[string]$id]
+        $source = Get-WheelImage ([string]$id)
+        if (-not $names -or -not $source) { continue }
+        $item = New-Object System.Windows.Controls.StackPanel
+        $item.Margin = New-Object System.Windows.Thickness(0, 0, 8, 0)
+        $item.ToolTip = "Рекомендуемый руль: $($names[1])"
+        $item.Background = [System.Windows.Media.Brushes]::Transparent
+        $image = New-Object System.Windows.Controls.Image
+        $image.Source = $source
+        $image.Width = 38
+        $image.Height = 38
+        [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($image, [System.Windows.Media.BitmapScalingMode]::HighQuality)
+        [void]$item.Children.Add($image)
+        $label = New-Object System.Windows.Controls.TextBlock
+        $label.Text = $names[0]
+        $label.FontSize = 10
+        $label.FontWeight = [System.Windows.FontWeights]::SemiBold
+        $label.Foreground = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(0xD9, 0xDD, 0xE1))
+        $label.HorizontalAlignment = 'Center'
+        $label.Margin = New-Object System.Windows.Thickness(0, 2, 0, 0)
+        [void]$item.Children.Add($label)
+        [void]$panel.Children.Add($item)
+    }
+    if ($panel.Children.Count -eq 0) { return $null }
+    return $panel
+}
+
 function New-Tile($App) {
     $button = New-Object System.Windows.Controls.Button
     $button.Style = $Window.FindResource('TileButton')
@@ -2543,10 +2610,16 @@ function New-Tile($App) {
         $content.FontWeight = [System.Windows.FontWeights]::SemiBold
         $content.Foreground = [System.Windows.Media.Brushes]::White
     }
-    # Значок «i» в углу плитки: описание игры простыми словами
-    if ($App.Info) {
+    # Рули слева вверху и значок «i» справа: поверх обложки
+    $wheelBadges = $(if (@($App.Wheels).Count -gt 0) { New-WheelBadges $App } else { $null })
+    if ($wheelBadges -or $App.Info) {
         $holder = New-Object System.Windows.Controls.Grid
         [void]$holder.Children.Add($content)
+        if ($wheelBadges) { [void]$holder.Children.Add($wheelBadges) }
+        $content = $holder
+    }
+    # Значок «i» в углу плитки: описание игры простыми словами
+    if ($App.Info) {
         $info = New-Object System.Windows.Controls.Button
         $info.Style = $Window.FindResource('InfoBadge')
         $info.Tag = $App
@@ -2557,7 +2630,6 @@ function New-Tile($App) {
             Show-GameInfo $sender.Tag
         })
         [void]$holder.Children.Add($info)
-        $content = $holder
     }
     $button.Content = $content
 

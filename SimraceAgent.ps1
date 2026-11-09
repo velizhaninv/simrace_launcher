@@ -27,6 +27,11 @@ $script:LauncherBusy = $false
 $script:LauncherSeen = [datetime]::MinValue
 $script:IdleNext = [datetime]::MinValue
 $script:ForceUpdate = $false
+$script:WaitAction = 'update'
+$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; reboot = 'Перезагрузка' }
+$script:AdminComputer = 'SIMRACE-14'
+$script:AdminIps = @()
+$script:AdminIpsUntil = [datetime]::MinValue
 $script:RestartSelf = $false
 $script:AgentHash = $(try { (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash } catch { '' })
 $script:LastBusy = ''
@@ -383,14 +388,41 @@ function Update-WaitingUpdate {
     if ($script:State -ne 'waiting-idle' -or (Get-Date) -lt $script:IdleNext) { return }
     $script:IdleNext = (Get-Date).AddSeconds(30)
     $busy = $(if ($script:ForceUpdate) { '' } else { Get-BusyReason })
+    $title = $script:WaitTitles[$script:WaitAction]
     if ($busy) {
         # Причину ожидания пишем в журнал один раз, при её смене
-        if ($busy -ne $script:LastBusy) { Write-Log "Обновление по сети ждёт: $busy" }
+        if ($busy -ne $script:LastBusy) { Write-Log "$title по сети ждёт: $busy" }
         $script:LastBusy = $busy
         return
     }
     $script:ForceUpdate = $false
-    Write-Log 'Обновление по сети: кокпит свободен, начинаю'
+    Write-Log "$title по сети: кокпит свободен, начинаю"
+    if ($script:WaitAction -eq 'reboot') {
+        $script:State = 'rebooting'
+        Restart-Pc
+        return
+    }
+    if ($script:WaitAction -eq 'lock') {
+        try {
+            $filter = Get-UwfFilter
+            Set-Uwf $true
+            if ($filter.CurrentEnabled) {
+                # Защита уже работает: перезагрузка не нужна
+                $script:State = 'idle'
+                Write-Log 'Блокировка по сети: защита уже включена'
+                return
+            }
+            $script:State = 'rebooting'
+            Restart-Pc
+        }
+        catch {
+            $script:State = 'idle'
+            $script:UpdateOk = $false
+            $script:Message = "Блокировка по сети не выполнена: $($_.Exception.Message)"
+            Write-Log $script:Message
+        }
+        return
+    }
     $filter = Get-UwfFilter
     if ($filter -and $filter.CurrentEnabled) {
         Set-Pending 'remote-relock'
@@ -413,8 +445,9 @@ function Update-WaitingUpdate {
     Start-Update
 }
 
-# Подключения из локальной сети: только состояние и запуск обновления, без пароля.
-# Обновление ставит официальную версию с GitHub и ждёт, пока кокпит освободится.
+# Подключения из локальной сети: состояние и обновление от любого компьютера клуба, без пароля.
+# Обновление ставит официальную версию с GitHub. Блокировка и перезагрузка принимаются только с SIMRACE-14.
+# Все три команды ждут, пока на кокпите закончится сеанс, если администратор не попросил не ждать.
 function Update-Network {
     if (-not $script:Listener) { return }
     while ($script:Listener.Pending()) {
@@ -428,7 +461,8 @@ function Update-Network {
             $writer.AutoFlush = $true
             $line = $reader.ReadLine()
             $response = $null
-            try { $response = Invoke-NetRequest ($line | ConvertFrom-Json) }
+            $remote = $client.Client.RemoteEndPoint.Address
+            try { $response = Invoke-NetRequest ($line | ConvertFrom-Json) $remote }
             catch { $response = @{ ok = $false; error = $_.Exception.Message } }
             $writer.WriteLine(($response | ConvertTo-Json -Compress -Depth 4))
         }
@@ -437,7 +471,21 @@ function Update-Network {
     }
 }
 
-function Invoke-NetRequest($Request) {
+# Блокировку и перезагрузку принимаем только с администраторского компьютера SIMRACE-14
+function Test-AdminSource([System.Net.IPAddress]$Remote) {
+    if (-not $Remote) { return $false }
+    if ($Remote.IsIPv4MappedToIPv6) { $Remote = $Remote.MapToIPv4() }
+    if ((Get-Date) -ge $script:AdminIpsUntil) {
+        $script:AdminIpsUntil = (Get-Date).AddMinutes(5)
+        try { $script:AdminIps = @([System.Net.Dns]::GetHostAddresses($script:AdminComputer) | ForEach-Object { $_.ToString() }) }
+        catch { $script:AdminIps = @() }
+    }
+    # Сам SIMRACE-14 может обратиться к себе по любому своему адресу
+    if ($env:COMPUTERNAME -eq $script:AdminComputer -and [System.Net.IPAddress]::IsLoopback($Remote)) { return $true }
+    return ($script:AdminIps -contains $Remote.ToString())
+}
+
+function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
     switch ([string]$Request.action) {
         'status' {
             $filter = Get-UwfFilter
@@ -447,11 +495,42 @@ function Invoke-NetRequest($Request) {
                 message = $script:Message; updateOk = $script:UpdateOk
                 uwfNow = [bool]($filter -and $filter.CurrentEnabled); uwfNext = [bool]($filter -and $filter.NextEnabled)
                 usedMb = $data.usedMb; freeMb = $data.freeMb; pages = @($data.pages); busy = Get-BusyReason
+                pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
             }
         }
-        'update' {
+        { $_ -eq 'lock' -or $_ -eq 'reboot' } {
+            $action = [string]$Request.action
+            if (-not (Test-AdminSource $Remote)) {
+                Write-Log "Отказано: команда «$action» пришла с $Remote, а не с $($script:AdminComputer)"
+                return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
+            }
+            if ($action -eq 'lock' -and -not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере нет.' } }
             if ($script:State -eq 'idle') {
                 $script:State = 'waiting-idle'
+                $script:WaitAction = $action
+                $script:IdleNext = [datetime]::MinValue
+                $script:Message = ''
+                $script:UpdateOk = $true
+                $script:LastBusy = ''
+                Write-Log "$($script:WaitTitles[$action]) по сети: команда с $Remote"
+            }
+            elseif ($script:State -ne 'waiting-idle' -or $script:WaitAction -ne $action) {
+                return @{ ok = $false; error = "Кокпит занят другой командой: $($script:State) $($script:WaitAction)" }
+            }
+            if ($Request.force) {
+                $script:ForceUpdate = $true
+                $script:IdleNext = [datetime]::MinValue
+                Write-Log "$($script:WaitTitles[$action]) по сети: без ожидания конца сеанса"
+            }
+            return @{ ok = $true; state = $script:State }
+        }
+        'update' {
+            if ($script:State -eq 'waiting-idle' -and $script:WaitAction -ne 'update') {
+                return @{ ok = $false; error = "Кокпит ждёт другую команду: $($script:WaitAction)" }
+            }
+            if ($script:State -eq 'idle') {
+                $script:State = 'waiting-idle'
+                $script:WaitAction = 'update'
                 $script:IdleNext = [datetime]::MinValue
                 $script:Message = ''
                 $script:UpdateOk = $true
