@@ -2553,38 +2553,28 @@ function New-WheelBadges($App) {
     $panel = New-Object System.Windows.Controls.StackPanel
     $panel.Orientation = 'Horizontal'
     $panel.HorizontalAlignment = 'Left'
-    $panel.VerticalAlignment = 'Top'
-    $panel.Margin = New-Object System.Windows.Thickness(10, 8, 0, 0)
-    # Тень под рулями и подписями: читаются на любой обложке, без фоновой плашки
+    $panel.VerticalAlignment = 'Bottom'
+    $panel.Margin = New-Object System.Windows.Thickness(10, 0, 0, 10)
+    # Лёгкая тень: у самих картинок светлый контур, тень отделяет их от светлых обложек
     $shadow = New-Object System.Windows.Media.Effects.DropShadowEffect
-    $shadow.BlurRadius = 10
+    $shadow.BlurRadius = 8
     $shadow.ShadowDepth = 0
-    $shadow.Opacity = 0.9
+    $shadow.Opacity = 0.75
     $shadow.Color = [System.Windows.Media.Colors]::Black
     $panel.Effect = $shadow
     foreach ($id in @($App.Wheels)) {
         $names = $script:WheelNames[[string]$id]
         $source = Get-WheelImage ([string]$id)
         if (-not $names -or -not $source) { continue }
-        $item = New-Object System.Windows.Controls.StackPanel
-        $item.Margin = New-Object System.Windows.Thickness(0, 0, 8, 0)
-        $item.ToolTip = "Рекомендуемый руль: $($names[1])"
-        $item.Background = [System.Windows.Media.Brushes]::Transparent
+        # Без подписей: название руля всплывает при наведении
         $image = New-Object System.Windows.Controls.Image
         $image.Source = $source
-        $image.Width = 38
-        $image.Height = 38
+        $image.Width = 40
+        $image.Height = 40
+        $image.Margin = New-Object System.Windows.Thickness(0, 0, 6, 0)
+        $image.ToolTip = "Рекомендуемый руль: $($names[1])"
         [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($image, [System.Windows.Media.BitmapScalingMode]::HighQuality)
-        [void]$item.Children.Add($image)
-        $label = New-Object System.Windows.Controls.TextBlock
-        $label.Text = $names[0]
-        $label.FontSize = 10
-        $label.FontWeight = [System.Windows.FontWeights]::SemiBold
-        $label.Foreground = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(0xD9, 0xDD, 0xE1))
-        $label.HorizontalAlignment = 'Center'
-        $label.Margin = New-Object System.Windows.Thickness(0, 2, 0, 0)
-        [void]$item.Children.Add($label)
-        [void]$panel.Children.Add($item)
+        [void]$panel.Children.Add($image)
     }
     if ($panel.Children.Count -eq 0) { return $null }
     return $panel
@@ -2610,7 +2600,7 @@ function New-Tile($App) {
         $content.FontWeight = [System.Windows.FontWeights]::SemiBold
         $content.Foreground = [System.Windows.Media.Brushes]::White
     }
-    # Рули слева вверху и значок «i» справа: поверх обложки
+    # Рули слева внизу и значок «i» справа вверху: поверх обложки
     $wheelBadges = $(if (@($App.Wheels).Count -gt 0) { New-WheelBadges $App } else { $null })
     if ($wheelBadges -or $App.Info) {
         $holder = New-Object System.Windows.Controls.Grid
