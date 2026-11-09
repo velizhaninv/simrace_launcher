@@ -120,6 +120,52 @@ function Select-ServerExe([string]$Folder) {
     return $choice
 }
 
+# Сам сервер Kunos (accServer.exe) в репозиторий не кладём: он входит в ACC и берётся из установленной игры.
+# Программа сервера ищет его рядом с собой. После обновления ACC копия тоже обновится.
+function Copy-AccServerExe {
+    $steamRoots = @()
+    foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam') {
+        $value = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        if ($value -and $value.InstallPath) { $steamRoots += $value.InstallPath }
+    }
+    $libraries = @()
+    foreach ($root in $steamRoots) {
+        $libraries += $root
+        $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
+        if (Test-Path -LiteralPath $vdf) {
+            foreach ($match in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw -Encoding UTF8), '"path"\s+"([^"]+)"')) { $libraries += ($match.Groups[1].Value -replace '\\\\', '\') }
+        }
+    }
+    $server = $null
+    foreach ($library in @($libraries | Sort-Object -Unique)) {
+        $candidate = Join-Path $library 'steamapps\common\Assetto Corsa Competizione\server\accServer.exe'
+        if (Test-Path -LiteralPath $candidate) { $server = Get-Item -LiteralPath $candidate; break }
+    }
+    if (-not $server) {
+        Write-Warning 'accServer.exe не найден: ACC не установлен через Steam на этом компьютере. Программа сервера не запустит сервер.'
+        return
+    }
+    $copy = Join-Path $toolTarget 'accServer.exe'
+    $old = Get-Item -LiteralPath $copy -ErrorAction SilentlyContinue
+    if ($old -and $old.Length -eq $server.Length -and $old.LastWriteTimeUtc -eq $server.LastWriteTimeUtc) { return }
+    try {
+        Copy-Item -LiteralPath $server.FullName -Destination $copy -Force
+        Write-Host "accServer.exe скопирован из $($server.DirectoryName)"
+    }
+    catch { Write-Warning "accServer.exe не обновлён, возможно, сервер запущен: $($_.Exception.Message)" }
+}
+
+# Имя сервера по номеру компьютера: SimRace 10 на SIMRACE-10. Заданное вручную имя не меняется.
+function Set-AccServerName {
+    $settings = Join-Path $toolTarget 'cfg\settings.json'
+    $number = [regex]::Match($env:COMPUTERNAME, '(\d+)$')
+    if (-not (Test-Path -LiteralPath $settings) -or -not $number.Success) { return }
+    $text = [System.IO.File]::ReadAllText($settings)
+    if ($text -notmatch '"serverName"\s*:\s*"SimRace"') { return }
+    $text = $text -replace '"serverName"\s*:\s*"SimRace"', "`"serverName`": `"SimRace $([int]$number.Value)`""
+    [System.IO.File]::WriteAllText($settings, $text, [System.Text.Encoding]::Unicode)    # UTF-16 LE, как у сервера Kunos
+}
+
 # Копирует программу и привязывает её к правой кнопке мыши на плитке ACC.
 function Install-ServerTool($Config) {
     $source = Find-ServerToolSource
@@ -140,9 +186,21 @@ function Install-ServerTool($Config) {
     # Программа может быть открыта: тогда файл занят, остаётся прежняя версия, а обновление лаунчера продолжается
     try {
         if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination $toolTarget -Force }
-        else { Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $toolTarget -Recurse -Force }
+        else {
+            $prefix = (Get-Item -LiteralPath $source).FullName.TrimEnd('\').Length + 1
+            foreach ($file in @(Get-ChildItem -LiteralPath $source -Recurse -File -Force)) {
+                $relativeFile = $file.FullName.Substring($prefix)
+                $destination = Join-Path $toolTarget $relativeFile
+                # Настройки сервера кладём только при первой установке: правки, сделанные на компьютере, остаются
+                if (($relativeFile -like 'cfg\*' -or $relativeFile -eq 'schedule.json') -and (Test-Path -LiteralPath $destination)) { continue }
+                New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+                Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+            }
+        }
     }
     catch { Write-Warning "Программа сервера ACC не обновлена, возможно, она открыта: $($_.Exception.Message)" }
+    Copy-AccServerExe
+    Set-AccServerName
     Get-ChildItem -LiteralPath $toolTarget -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
     # Программа работает под гостем и должна сохранять свои настройки. При включённом UWF они сбрасываются после перезагрузки.
     & icacls.exe $toolsRoot /grant '*S-1-5-32-545:(OI)(CI)M' /T /Q | Out-Null
@@ -169,6 +227,7 @@ if ($Uninstall) {
     if (Test-Path -LiteralPath $launcherLink) { Remove-Item -LiteralPath $launcherLink -Force }
     if (Test-Path -LiteralPath $fleetLink) { Remove-Item -LiteralPath $fleetLink -Force }
     Remove-NetFirewallRule -Name $firewallRule -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -Name 'SIMRACE ACC Server' -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $target)  { Remove-Item -LiteralPath $target -Recurse -Force }
     if (Test-Path -LiteralPath $toolsRoot) { Remove-Item -LiteralPath $toolsRoot -Recurse -Force }
     Set-GuestPolicies $GuestUser $false
@@ -325,6 +384,13 @@ $link.TargetPath = Join-Path $target 'Start-Launcher.cmd'
 $link.WorkingDirectory = $target
 $link.WindowStyle = 7
 $link.Save()
+
+# Сервер ACC: подключения кокпитов из локальной сети. Без правила Windows спросит разрешение, а гость его дать не может.
+$accServerExe = Join-Path $toolTarget 'accServer.exe'
+Remove-NetFirewallRule -Name 'SIMRACE ACC Server' -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $accServerExe) {
+    New-NetFirewallRule -Name 'SIMRACE ACC Server' -DisplayName 'SIMRACE: сервер ACC' -Direction Inbound -Program $accServerExe -RemoteAddress LocalSubnet -Action Allow -Profile Any | Out-Null
+}
 
 # Обновление по сети: служба принимает подключения только из локальной сети
 Remove-NetFirewallRule -Name $firewallRule -ErrorAction SilentlyContinue
