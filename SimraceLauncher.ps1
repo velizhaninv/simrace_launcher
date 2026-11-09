@@ -3215,6 +3215,10 @@ function Submit-AdminLogin {
     $status = Invoke-Agent @{ action = 'status' }
     $TxtAdminNote.Text = $(if ($status) { "Версия лаунчера: $($status.version)" } else { 'Служба лаунчера не запущена: обновление и блокировка недоступны. Обнови лаунчер командой на этом компьютере.' })
     $TxtAdminNote.Foreground = $Window.FindResource('Muted')
+    if ($status -and $script:UpdateAvailable) {
+        $TxtAdminNote.Text = "Версия лаунчера: $($status.version). Доступна новая: $($script:UpdateLatest), кнопка «Обновить»."
+        $TxtAdminNote.Foreground = $Window.FindResource('Accent')
+    }
     # Служба видит защиту надёжнее, чем гостевая учётная запись
     if ($status) { Set-UwfDisplay $(if ($status.uwfNow) { 'ON' } else { 'OFF' }) }
     Set-AdminPage 'menu'
@@ -3338,7 +3342,8 @@ function Close-Launcher([int]$Code) {
 # ---------- Опрос службы в фоне: окно не ждёт её ответа ----------
 
 function Start-AgentPoller {
-    $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false; Busy = $false })
+    $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false; Busy = $false; Latest = ''
+        VersionUrl = 'https://raw.githubusercontent.com/velizhaninv/simrace_launcher/main/version.txt' })
     $ps = [powershell]::Create()
     [void]$ps.AddScript({
         param($Shared)
@@ -3357,7 +3362,17 @@ function Start-AgentPoller {
             finally { $client.Dispose() }
         }
         $tick = 0
+        $nextVersion = (Get-Date).AddSeconds(20)
         while (-not $Shared.Stop) {
+            # Последняя версия на GitHub: через 20 секунд после запуска и дальше раз в 2 часа
+            if ((Get-Date) -ge $nextVersion) {
+                $nextVersion = (Get-Date).AddHours(2)
+                try {
+                    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                    $Shared.Latest = ([string](Invoke-WebRequest -Uri "$($Shared.VersionUrl)?t=$([DateTime]::UtcNow.Ticks)" -UseBasicParsing -TimeoutSec 8).Content).Trim()
+                }
+                catch { $nextVersion = (Get-Date).AddMinutes(10) }
+            }
             $Shared.Status = Send-Line $(if ($Shared.Busy) { '{"action":"status","session":true}' } else { '{"action":"status","session":false}' })
             if ($tick % 5 -eq 0) { $Shared.Overlay = Send-Line '{"action":"overlay"}' }
             $tick++
@@ -3366,6 +3381,53 @@ function Start-AgentPoller {
     }).AddArgument($script:AgentShared)
     $script:AgentPoller = $ps
     [void]$ps.BeginInvoke()
+}
+
+# ---------- Уведомление об обновлении ----------
+
+# Больше нуля, если версия A новее B. Формат версии: 2026.11.09-12
+function Compare-LauncherVersion([string]$A, [string]$B) {
+    $partsA = $A.Trim() -split '-', 2
+    $partsB = $B.Trim() -split '-', 2
+    if ($partsA[0] -ne $partsB[0]) { return [string]::CompareOrdinal($partsA[0], $partsB[0]) }
+    $numberA = 0
+    $numberB = 0
+    if ($partsA.Count -gt 1) { [void][int]::TryParse($partsA[1], [ref]$numberA) }
+    if ($partsB.Count -gt 1) { [void][int]::TryParse($partsB[1], [ref]$numberB) }
+    return $numberA - $numberB
+}
+
+# Точка на шестерёнке, подсказка и уведомление внизу экрана. Обновить может только администратор, через панель.
+function Update-UpdateNotice {
+    if ($script:UpdateToastUntil -ne [datetime]::MinValue -and (Get-Date) -ge $script:UpdateToastUntil) {
+        $UpdateToast.Visibility = 'Collapsed'
+        $script:UpdateToastUntil = [datetime]::MinValue
+    }
+    $latest = $(if ($script:AgentShared) { [string]$script:AgentShared.Latest } else { '' })
+    if (-not $latest) { return }
+    $status = Get-AgentShared 'Status'
+    $installed = $(if ($status -and $status.version) { [string]$status.version } else { $script:LauncherVersion })
+    if (-not $installed) { return }
+    $newer = (Compare-LauncherVersion $latest $installed) -gt 0
+    if ($newer -eq $script:UpdateAvailable -and $latest -eq $script:UpdateLatest) { return }
+    $script:UpdateAvailable = $newer
+    $script:UpdateLatest = $latest
+    if ($script:GearDot) { $script:GearDot.Visibility = $(if ($newer) { 'Visible' } else { 'Collapsed' }) }
+    if ($script:GearButton) { $script:GearButton.ToolTip = $(if ($newer) { "Панель администратора. Доступна версия $latest" } else { 'Панель администратора' }) }
+    $TxtUpdateTile.Text = $(if ($newer) { 'Новая версия' } else { 'Обновить' })
+    $TxtUpdateTile.Foreground = $(if ($newer) { $Window.FindResource('Accent') } else { New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(0xC9, 0xCC, 0xD0)) })
+    if (-not $newer) {
+        $UpdateToast.Visibility = 'Collapsed'
+        return
+    }
+    Write-Log "Доступно обновление: $latest (установлена $installed)"
+    # Уведомление показываем один раз и только без сеанса, чтобы не мешать гостю
+    if (-not $script:UpdateToastShown -and -not $script:Session -and $script:TimerState -eq 'idle') {
+        $script:UpdateToastShown = $true
+        $TxtUpdateToast.Text = "Версия $latest, сейчас установлена $installed. Обновить можно в панели администратора."
+        $UpdateToast.Visibility = 'Visible'
+        $script:UpdateToastUntil = (Get-Date).AddSeconds(20)
+    }
 }
 
 # Последний ответ службы. $null: служба не запущена или ещё не ответила.
@@ -4330,6 +4392,19 @@ function Submit-Decision([bool]$Lock) {
       <Button x:Name="BtnOverlayCorner" Style="{StaticResource CornerLink}" Visibility="Collapsed"/>
     </Grid>
 
+    <!-- Уведомление об обновлении: появляется на 20 секунд после запуска, если на GitHub есть версия новее -->
+    <Border x:Name="UpdateToast" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,32,32" MaxWidth="460"
+            Background="#F2141518" BorderBrush="#E2450F" BorderThickness="1" CornerRadius="14" Padding="20,14,20,12">
+      <DockPanel>
+        <Button x:Name="BtnUpdateToastClose" DockPanel.Dock="Right" Content="✕" Style="{StaticResource CornerLink}" VerticalAlignment="Top" FontSize="15" Margin="14,-4,-8,0" ToolTip="Скрыть"/>
+        <StackPanel>
+          <TextBlock Text="ДОСТУПНО ОБНОВЛЕНИЕ" FontSize="13" FontWeight="SemiBold" Foreground="#E2450F"/>
+          <TextBlock x:Name="TxtUpdateToast" FontSize="16" Foreground="White" TextWrapping="Wrap" Margin="0,6,0,0"/>
+          <Button x:Name="BtnUpdateToastOpen" Content="Открыть панель администратора" Style="{StaticResource CornerLink}" HorizontalAlignment="Left" FontSize="15" Margin="-8,6,0,0"/>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
     <Grid x:Name="AdminPanel" Visibility="Collapsed" Background="#E60A0B0D">
       <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="820" Background="#FA141518" BorderBrush="#2A2D31" BorderThickness="1" CornerRadius="22" Padding="38,32,38,26">
         <Border.Effect><DropShadowEffect BlurRadius="46" ShadowDepth="0" Color="#E2450F" Opacity="0.13"/></Border.Effect>
@@ -4378,7 +4453,7 @@ function Submit-Decision([bool]$Lock) {
               <Button x:Name="BtnAdminSettings" Style="{StaticResource AdminIconTile}" ToolTip="Настройки лаунчера"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M4,7 H20 M4,17 H20" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Ellipse Canvas.Left="12" Canvas.Top="4" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/><Ellipse Canvas.Left="6" Canvas.Top="14" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Настройки" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
               <Button x:Name="BtnMinimizeLauncher" Style="{StaticResource AdminIconTile}" ToolTip="Свернуть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M5,19 H19" Stroke="White" StrokeThickness="2.4" StrokeStartLineCap="Round"/></Canvas><TextBlock Text="Свернуть" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
               <Button x:Name="BtnRestartLauncher" Style="{StaticResource AdminIconTile}" ToolTip="Перезапустить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезапуск" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
-              <Button x:Name="BtnAdminUpdate" Style="{StaticResource AdminIconTile}" ToolTip="Обновить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M5,20 H19" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Обновить" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnAdminUpdate" Style="{StaticResource AdminIconTile}" ToolTip="Обновить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M5,20 H19" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock x:Name="TxtUpdateTile" Text="Обновить" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
               <Button x:Name="BtnExit" Style="{StaticResource AdminIconTile}" ToolTip="Закрыть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/><Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Закрыть" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
             </UniformGrid>
 
@@ -4606,9 +4681,16 @@ try {
     $script:AllowClose = $false
     $script:LayoutKey = ''
     $script:Tiles = New-Object System.Collections.ArrayList
+    $script:LauncherVersion = $(try { (Get-Content -LiteralPath (Join-Path $script:Root 'version.txt') -TotalCount 1 -ErrorAction Stop).Trim() } catch { '' })
+    $script:UpdateAvailable = $false
+    $script:UpdateLatest = ''
+    $script:UpdateToastShown = $false
+    $script:UpdateToastUntil = [datetime]::MinValue
+    $script:GearDot = $null
+    $script:GearButton = $null
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-    foreach ($name in 'BackgroundImage', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
+    foreach ($name in 'BackgroundImage', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
@@ -4746,6 +4828,27 @@ try {
     $HeaderTools.Children.Remove($gear)
     $gear.Margin = New-Object System.Windows.Thickness(10, 0, 0, 0)
     [void]$ToolsPanel.Children.Add($gear)
+    # Оранжевая точка: на GitHub есть версия новее установленной
+    $script:GearButton = $gear
+    $script:GearDot = New-Object System.Windows.Shapes.Ellipse
+    $script:GearDot.Width = 9
+    $script:GearDot.Height = 9
+    $script:GearDot.Fill = $Window.FindResource('Accent')
+    $script:GearDot.Stroke = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(0x0E, 0x0F, 0x11))
+    $script:GearDot.StrokeThickness = 1.5
+    $script:GearDot.Visibility = 'Collapsed'
+    [System.Windows.Controls.Canvas]::SetLeft($script:GearDot, 17)
+    [System.Windows.Controls.Canvas]::SetTop($script:GearDot, -2)
+    [void]$gear.Content.Children[0].Children.Add($script:GearDot)
+    $BtnUpdateToastClose.Add_Click({
+        $UpdateToast.Visibility = 'Collapsed'
+        $script:UpdateToastUntil = [datetime]::MinValue
+    })
+    $BtnUpdateToastOpen.Add_Click({
+        $UpdateToast.Visibility = 'Collapsed'
+        $script:UpdateToastUntil = [datetime]::MinValue
+        Show-AdminPanel
+    })
 
     $BtnAdminLogin.Add_Click({ Submit-AdminLogin })
     $BtnRestartLauncher.Add_Click({ Close-Launcher 2 })
@@ -4871,6 +4974,7 @@ try {
             Update-Fact
             if ($script:TickCount % 20 -eq 1) { Update-OverlayGauge }
             if ($script:TickCount % 4 -eq 2) { Test-RestartRequest }
+            if ($script:TickCount % 4 -eq 3) { Update-UpdateNotice }
             # Для обновления по сети: служба дождётся конца сеанса
             if ($script:AgentShared) { $script:AgentShared.Busy = [bool]($script:Config.requireSession -ne $false -and $script:TimerState -ne 'idle') }
             if ($script:TickCount % 6 -eq 0) {
