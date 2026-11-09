@@ -222,6 +222,38 @@ function Set-OverlaySize {
     else { Write-Log "Не удалось задать оверлей $($script:OverlayMB) МБ, сейчас на следующую загрузку: $($after.MaximumSize)" }
 }
 
+# ---------- Размер overlay ----------
+
+$script:OverlayMB = 12288      # 12 ГБ
+
+# Overlay UWF на диске: 12 ГБ, пороги как в UWF-Panel (предупреждение 2/3, критический 90%).
+# Размер меняется со следующей загрузки. Меняем только при выключенной защите: тогда свободное место на C: известно точно.
+function Set-OverlaySize {
+    $filter = Get-UwfFilter
+    if (-not $filter -or $filter.CurrentEnabled) { return }
+    $next = Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName UWF_OverlayConfig -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.CurrentSession } | Select-Object -First 1
+    if (-not $next -or [int]$next.MaximumSize -eq $script:OverlayMB) { return }
+    if ($next.Type -eq 0) {
+        # Overlay в ОЗУ: 12 ГБ памяти под него не отдаём, раньше это приводило к перезагрузкам
+        Write-Log "Overlay в оперативной памяти, $($next.MaximumSize) МБ: размер не меняю. Переведи overlay на диск в панели UWF"
+        return
+    }
+    $volume = Get-Volume -DriveLetter $env:SystemDrive.TrimEnd(':') -ErrorAction SilentlyContinue
+    $limitMb = $(if ($volume) { ([math]::Floor($volume.SizeRemaining / 1GB) - 2) * 1024 } else { 0 })
+    if ($limitMb -lt $script:OverlayMB) {
+        Write-Log "Overlay 12 ГБ не помещается на $($env:SystemDrive): можно $limitMb МБ. Оставлено $($next.MaximumSize) МБ"
+        return
+    }
+    $mb = $script:OverlayMB
+    & $script:Uwfmgr overlay set-size $mb | Out-Null
+    & $script:Uwfmgr overlay set-warningthreshold ([math]::Round($mb * 2 / 3)) | Out-Null
+    & $script:Uwfmgr overlay set-criticalthreshold ([math]::Round($mb * 0.9)) | Out-Null
+    $check = Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName UWF_OverlayConfig -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.CurrentSession } | Select-Object -First 1
+    Write-Log "Overlay после перезагрузки: $($check.MaximumSize) МБ (было $($next.MaximumSize) МБ)"
+}
+
 # Включение и выключение защиты: те же шаги и проверки, что в UWF-Panel
 function Set-Uwf([bool]$Enable) {
     $filter = Get-UwfFilter
@@ -234,6 +266,8 @@ function Set-Uwf([bool]$Enable) {
         if (-not (Test-NextProtected $env:SystemDrive)) { & $script:Uwfmgr volume protect $env:SystemDrive | Out-Null }
         # 3. Включить фильтр со следующей загрузки
         & $script:Uwfmgr filter enable | Out-Null
+        # Overlay 12 ГБ. Ошибка размера не мешает включить защиту.
+        try { Set-OverlaySize } catch { Write-Log "Ошибка настройки overlay: $_" }
         # 4. Заново прописать подкачку, только пока защита в текущей сессии выключена: иначе запись уйдёт в оверлей
         if (-not $filter.CurrentEnabled -and (Test-Path -LiteralPath $page)) {
             Set-ItemProperty -Path $script:MemoryKey -Name PagingFiles -Type MultiString -Value @("$($script:PageDrive)\pagefile.sys $($script:PageFileMB) $($script:PageFileMB)")
@@ -549,6 +583,8 @@ Write-Log "Служба запущена, версия $(Get-InstalledVersion)"
 
 try { Set-PageFileOnZ }
 catch { Write-Log "Ошибка настройки файла подкачки: $_" }
+try { Set-OverlaySize }
+catch { Write-Log "Ошибка настройки overlay: $_" }
 
 # Сетевые команды из локальной сети
 try {
