@@ -3424,9 +3424,10 @@ function Update-UpdateNotice {
     # Уведомление показываем один раз и только без сеанса, чтобы не мешать гостю
     if (-not $script:UpdateToastShown -and -not $script:Session -and $script:TimerState -eq 'idle') {
         $script:UpdateToastShown = $true
-        $TxtUpdateToast.Text = "Версия $latest, сейчас установлена $installed. Обновить можно в панели администратора."
+        $TxtUpdateToast.Text = "Версия $latest"
+        $UpdateToast.ToolTip = "Сейчас установлена $installed. Обновить можно в панели администратора, с паролем."
         $UpdateToast.Visibility = 'Visible'
-        $script:UpdateToastUntil = (Get-Date).AddSeconds(20)
+        $script:UpdateToastUntil = (Get-Date).AddSeconds(30)
     }
 }
 
@@ -4392,17 +4393,18 @@ function Submit-Decision([bool]$Lock) {
       <Button x:Name="BtnOverlayCorner" Style="{StaticResource CornerLink}" Visibility="Collapsed"/>
     </Grid>
 
-    <!-- Уведомление об обновлении: появляется на 20 секунд после запуска, если на GitHub есть версия новее -->
-    <Border x:Name="UpdateToast" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,32,32" MaxWidth="460"
-            Background="#F2141518" BorderBrush="#E2450F" BorderThickness="1" CornerRadius="14" Padding="20,14,20,12">
-      <DockPanel>
-        <Button x:Name="BtnUpdateToastClose" DockPanel.Dock="Right" Content="✕" Style="{StaticResource CornerLink}" VerticalAlignment="Top" FontSize="15" Margin="14,-4,-8,0" ToolTip="Скрыть"/>
-        <StackPanel>
-          <TextBlock Text="ДОСТУПНО ОБНОВЛЕНИЕ" FontSize="13" FontWeight="SemiBold" Foreground="#E2450F"/>
-          <TextBlock x:Name="TxtUpdateToast" FontSize="16" Foreground="White" TextWrapping="Wrap" Margin="0,6,0,0"/>
-          <Button x:Name="BtnUpdateToastOpen" Content="Открыть панель администратора" Style="{StaticResource CornerLink}" HorizontalAlignment="Left" FontSize="15" Margin="-8,6,0,0"/>
+    <!-- Уведомление об обновлении: небольшая плашка в правом нижнем углу, для администратора. Сама скрывается через 30 секунд -->
+    <Border x:Name="UpdateToast" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,24"
+            Background="#EB141518" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="12" Padding="14,10,10,10">
+      <StackPanel Orientation="Horizontal">
+        <Ellipse Width="8" Height="8" Fill="#E2450F" VerticalAlignment="Center"/>
+        <StackPanel VerticalAlignment="Center" Margin="10,0,16,0">
+          <TextBlock Text="Обновление лаунчера" FontSize="12" Foreground="#A2A6AB"/>
+          <TextBlock x:Name="TxtUpdateToast" FontSize="15" FontWeight="SemiBold" Foreground="White" Margin="0,1,0,0"/>
         </StackPanel>
-      </DockPanel>
+        <Button x:Name="BtnUpdateToastOpen" Content="Обновить" Style="{StaticResource AdminGhost}" FontSize="14" Padding="12,5" VerticalAlignment="Center" Margin="0,0,6,0"/>
+        <Button x:Name="BtnUpdateToastClose" Content="Не сейчас" Style="{StaticResource AdminGhost}" FontSize="14" Padding="12,5" VerticalAlignment="Center"/>
+      </StackPanel>
     </Border>
 
     <Grid x:Name="AdminPanel" Visibility="Collapsed" Background="#E60A0B0D">
