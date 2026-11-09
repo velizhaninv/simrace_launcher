@@ -471,18 +471,30 @@ function Update-Network {
     }
 }
 
-# Блокировку и перезагрузку принимаем только с администраторского компьютера SIMRACE-14
+# Блокировку и перезагрузку принимаем только с администраторского компьютера SIMRACE-14.
+# У SIMRACE-14 может быть несколько адресов (локальная сеть, Radmin VPN), поэтому проверяем двумя способами:
+# адреса по имени SIMRACE-14 и имя компьютера по адресу, с которого пришла команда.
 function Test-AdminSource([System.Net.IPAddress]$Remote) {
     if (-not $Remote) { return $false }
     if ($Remote.IsIPv4MappedToIPv6) { $Remote = $Remote.MapToIPv4() }
-    if ((Get-Date) -ge $script:AdminIpsUntil) {
-        $script:AdminIpsUntil = (Get-Date).AddMinutes(5)
-        try { $script:AdminIps = @([System.Net.Dns]::GetHostAddresses($script:AdminComputer) | ForEach-Object { $_.ToString() }) }
-        catch { $script:AdminIps = @() }
-    }
-    # Сам SIMRACE-14 может обратиться к себе по любому своему адресу
+    $ip = $Remote.ToString()
     if ($env:COMPUTERNAME -eq $script:AdminComputer -and [System.Net.IPAddress]::IsLoopback($Remote)) { return $true }
-    return ($script:AdminIps -contains $Remote.ToString())
+    # 1. Адреса по имени: при несовпадении узнаём заново, вдруг адрес сменился
+    foreach ($fresh in $false, $true) {
+        if ($fresh -or (Get-Date) -ge $script:AdminIpsUntil) {
+            try { $script:AdminIps = @([System.Net.Dns]::GetHostAddresses($script:AdminComputer) | ForEach-Object { $(if ($_.IsIPv4MappedToIPv6) { $_.MapToIPv4() } else { $_ }).ToString() }) }
+            catch { $script:AdminIps = @() }
+            # Пустой ответ не запоминаем
+            $script:AdminIpsUntil = $(if ($script:AdminIps.Count -gt 0) { (Get-Date).AddMinutes(5) } else { [datetime]::MinValue })
+        }
+        if ($script:AdminIps -contains $ip) { return $true }
+    }
+    # 2. Имя по адресу
+    $name = ''
+    try { $name = ([System.Net.Dns]::GetHostEntry($Remote).HostName -split '\.')[0] } catch { }
+    if ($name -and $name -eq $script:AdminComputer) { return $true }
+    Write-Log "Проверка источника: команда с $ip, адреса $($script:AdminComputer): $($script:AdminIps -join ', '), имя по адресу: $(if ($name) { $name } else { 'не найдено' })"
+    return $false
 }
 
 function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
