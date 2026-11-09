@@ -118,6 +118,7 @@ $script:QueryScript = {
         <StackPanel Orientation="Horizontal">
           <Button x:Name="BtnUpdate" Content="Обновить лаунчер" Style="{StaticResource Primary}"/>
           <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
+          <Button x:Name="BtnUnlock" Content="Разблокировать" Style="{StaticResource Btn}"/>
           <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
         </StackPanel>
       </DockPanel>
@@ -131,7 +132,7 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnLock', 'BtnReboot', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
@@ -194,7 +195,8 @@ foreach ($name in $script:Names) {
         Page = (New-Cell $grid 6 '')
         Now = (New-Cell $grid 7 '')
     }
-    [void](New-Cell $grid 1 $name '#FFFFFF' $true)
+    # Имя кокпита краснеет, когда защита выключена: такой кокпит нужно заблокировать обратно
+    $row | Add-Member -NotePropertyName NameCell -NotePropertyValue (New-Cell $grid 1 $name '#FFFFFF' $true)
     $border.Child = $grid
     [void]$Rows.Children.Add($border)
     $script:RowMap[$name] = $row
@@ -208,6 +210,7 @@ function Show-Result($Row, $Answer, [string]$Latest) {
         $Row.Link.Text = 'нет связи'
         $Row.Link.Foreground = New-Brush '#E5301A'
         foreach ($cell in $Row.Ver, $Row.Uwf, $Row.Over, $Row.Page, $Row.Now) { $cell.Text = '' }
+        $Row.NameCell.Foreground = New-Brush '#FFFFFF'
         $Row.Now.Text = 'выключен или служба старая'
         $Row.Now.Foreground = New-Brush '#7C8085'
         return
@@ -223,6 +226,8 @@ function Show-Result($Row, $Answer, [string]$Latest) {
     if ([bool]$data.uwfNow -ne [bool]$data.uwfNext) { $now += $(if ($data.uwfNext) { ' → вкл' } else { ' → выкл' }) }
     $Row.Uwf.Text = $now
     $Row.Uwf.Foreground = New-Brush $(if ($data.uwfNow) { '#37C552' } else { '#E5301A' })
+    $Row.NameCell.Foreground = New-Brush $(if ($data.uwfNow) { '#FFFFFF' } else { '#FF6A55' })
+    $Row.NameCell.ToolTip = $(if ($data.uwfNow) { $null } else { 'Защита выключена' })
 
     $total = [double]$data.usedMb + [double]$data.freeMb
     if ($data.uwfNow -and $total -gt 0) {
@@ -254,7 +259,7 @@ function Show-Result($Row, $Answer, [string]$Latest) {
     $Row.BusyText = [string]$data.busy
     $text = switch ([string]$data.state) {
         'waiting-idle' {
-            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'reboot' { 'перезагрузится' } default { 'обновится' } })
+            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } default { 'обновится' } })
             $(if ($data.busy) { "$verb после сеанса ($($data.busy))" } else { "$verb через несколько секунд" })
         }
         'updating' { 'обновляется' }
@@ -282,7 +287,7 @@ function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scrip
     $ps = [powershell]::Create()
     [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnReboot) { $button.IsEnabled = $false }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $false }
     return $true
 }
 
@@ -290,7 +295,7 @@ function Update-Query {
     if (-not $script:Running -or -not $script:Running.Async.IsCompleted) { return }
     $job = $script:Running
     $script:Running = $null
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnReboot) { $button.IsEnabled = $true }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $true }
     $output = $null
     try { $output = @($job.Ps.EndInvoke($job.Async))[0] } catch { $TxtStatus.Text = "Ошибка опроса: $_" }
     $job.Ps.Dispose()
@@ -312,6 +317,7 @@ function Start-Refresh {
 $script:Commands = @{
     update = @{ Verb = 'Обновить лаунчер на'; Now = 'Обновить их сразу'; Note = 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.'; Done = 'обновятся' }
     lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
+    unlock = @{ Verb = 'РАЗБЛОКИРОВАТЬ'; Now = 'Разблокировать их сразу'; Note = 'Защита UWF выключится, компьютеры перезагрузятся. Пока защита выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать их обратно.'; Done = 'разблокируются' }
     reboot = @{ Verb = 'Перезагрузить'; Now = 'Перезагрузить их сразу'; Note = 'Компьютеры перезагрузятся.'; Done = 'перезагрузятся' }
 }
 
@@ -345,7 +351,8 @@ function Start-RemoteCommand([string]$Action) {
         $busy = @($fresh | Where-Object { $script:RowMap[$_].Busy })
         $question = "$($text.Verb): $($fresh -join ', ')?`n`n$($text.Note)"
         if ($busy.Count -gt 0) { $question += "`n`nСейчас заняты: $($busy -join ', '). Они $($text.Done), когда закончится сеанс." }
-        if ([System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNo', 'Question') -ne 'Yes') { $selected = @($selected | Where-Object { $lines.ContainsKey($_) }) }
+        $icon = $(if ($Action -eq 'unlock') { 'Warning' } else { 'Question' })
+        if ([System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNo', $icon) -ne 'Yes') { $selected = @($selected | Where-Object { $lines.ContainsKey($_) }) }
         if ($selected.Count -eq 0) { return }
     }
     $started = Start-Query $selected $line $false {
@@ -373,6 +380,7 @@ function Start-RemoteCommand([string]$Action) {
 $BtnRefresh.Add_Click({ Start-Refresh })
 $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
+$BtnUnlock.Add_Click({ Start-RemoteCommand 'unlock' })
 $BtnReboot.Add_Click({ Start-RemoteCommand 'reboot' })
 $BtnSelectAll.Add_Click({ foreach ($row in $script:RowMap.Values) { if ($row.Online) { $row.Check.IsChecked = $true } } })
 $BtnSelectNone.Add_Click({ foreach ($row in $script:RowMap.Values) { $row.Check.IsChecked = $false } })

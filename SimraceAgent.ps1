@@ -28,7 +28,7 @@ $script:LauncherSeen = [datetime]::MinValue
 $script:IdleNext = [datetime]::MinValue
 $script:ForceUpdate = $false
 $script:WaitAction = 'update'
-$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; reboot = 'Перезагрузка' }
+$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка' }
 $script:AdminComputer = 'SIMRACE-14'
 $script:AdminIps = @()
 $script:AdminIpsUntil = [datetime]::MinValue
@@ -402,6 +402,27 @@ function Update-WaitingUpdate {
         Restart-Pc
         return
     }
+    if ($script:WaitAction -eq 'unlock') {
+        try {
+            $filter = Get-UwfFilter
+            Set-Uwf $false
+            if (-not $filter.CurrentEnabled) {
+                # Защита уже выключена: перезагрузка не нужна
+                $script:State = 'idle'
+                Write-Log 'Разблокировка по сети: защита уже выключена'
+                return
+            }
+            $script:State = 'rebooting'
+            Restart-Pc
+        }
+        catch {
+            $script:State = 'idle'
+            $script:UpdateOk = $false
+            $script:Message = "Разблокировка по сети не выполнена: $($_.Exception.Message)"
+            Write-Log $script:Message
+        }
+        return
+    }
     if ($script:WaitAction -eq 'lock') {
         try {
             $filter = Get-UwfFilter
@@ -446,7 +467,7 @@ function Update-WaitingUpdate {
 }
 
 # Подключения из локальной сети: состояние и обновление от любого компьютера клуба, без пароля.
-# Обновление ставит официальную версию с GitHub. Блокировка и перезагрузка принимаются только с SIMRACE-14.
+# Обновление ставит официальную версию с GitHub. Блокировка, разблокировка и перезагрузка принимаются только с SIMRACE-14.
 # Все три команды ждут, пока на кокпите закончится сеанс, если администратор не попросил не ждать.
 function Update-Network {
     if (-not $script:Listener) { return }
@@ -510,13 +531,13 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
                 pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
             }
         }
-        { $_ -eq 'lock' -or $_ -eq 'reboot' } {
+        { $_ -eq 'lock' -or $_ -eq 'unlock' -or $_ -eq 'reboot' } {
             $action = [string]$Request.action
             if (-not (Test-AdminSource $Remote)) {
                 Write-Log "Отказано: команда «$action» пришла с $Remote, а не с $($script:AdminComputer)"
                 return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
             }
-            if ($action -eq 'lock' -and -not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере нет.' } }
+            if ($action -ne 'reboot' -and -not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере нет.' } }
             if ($script:State -eq 'idle') {
                 $script:State = 'waiting-idle'
                 $script:WaitAction = $action

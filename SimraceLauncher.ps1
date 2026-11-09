@@ -3450,16 +3450,20 @@ function Start-AgentPoller {
 
 # ---------- Уведомление об обновлении ----------
 
-# Больше нуля, если версия A новее B. Формат версии: 2026.11.09-12
+# Больше нуля, если версия A новее B. Формат версии: 2026.11.09-12 или 2026.11.09-27b
 function Compare-LauncherVersion([string]$A, [string]$B) {
     $partsA = $A.Trim() -split '-', 2
     $partsB = $B.Trim() -split '-', 2
     if ($partsA[0] -ne $partsB[0]) { return [string]::CompareOrdinal($partsA[0], $partsB[0]) }
+    $matchA = [regex]::Match($(if ($partsA.Count -gt 1) { $partsA[1] } else { '' }), '^(\d*)(.*)$')
+    $matchB = [regex]::Match($(if ($partsB.Count -gt 1) { $partsB[1] } else { '' }), '^(\d*)(.*)$')
     $numberA = 0
     $numberB = 0
-    if ($partsA.Count -gt 1) { [void][int]::TryParse($partsA[1], [ref]$numberA) }
-    if ($partsB.Count -gt 1) { [void][int]::TryParse($partsB[1], [ref]$numberB) }
-    return $numberA - $numberB
+    [void][int]::TryParse($matchA.Groups[1].Value, [ref]$numberA)
+    [void][int]::TryParse($matchB.Groups[1].Value, [ref]$numberB)
+    if ($numberA -ne $numberB) { return $numberA - $numberB }
+    # Буква после номера: 27b новее 27
+    return [string]::CompareOrdinal($matchA.Groups[2].Value, $matchB.Groups[2].Value)
 }
 
 # Точка на шестерёнке, подсказка и уведомление внизу экрана. Обновить может только администратор, через панель.
