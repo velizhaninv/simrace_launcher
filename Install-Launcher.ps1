@@ -137,8 +137,12 @@ function Install-ServerTool($Config) {
     }
 
     New-Item -ItemType Directory -Path $toolTarget -Force | Out-Null
-    if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination $toolTarget -Force }
-    else { Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $toolTarget -Recurse -Force }
+    # Программа может быть открыта: тогда файл занят, остаётся прежняя версия, а обновление лаунчера продолжается
+    try {
+        if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination $toolTarget -Force }
+        else { Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $toolTarget -Recurse -Force }
+    }
+    catch { Write-Warning "Программа сервера ACC не обновлена, возможно, она открыта: $($_.Exception.Message)" }
     Get-ChildItem -LiteralPath $toolTarget -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
     # Программа работает под гостем и должна сохранять свои настройки. При включённом UWF они сбрасываются после перезагрузки.
     & icacls.exe $toolsRoot /grant '*S-1-5-32-545:(OI)(CI)M' /T /Q | Out-Null
