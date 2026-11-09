@@ -120,7 +120,7 @@ function Select-ServerExe([string]$Folder) {
     return $choice
 }
 
-# Сам сервер Kunos (accServer.exe) в репозиторий не кладём: он входит в ACC и берётся из установленной игры.
+# Сам сервер Kunos (accServer.exe) в репозиторий не кладём: он берётся из Steam, из установленного Dedicated Server.
 # Программа сервера ищет его рядом с собой. После обновления ACC копия тоже обновится.
 function Copy-AccServerExe {
     $steamRoots = @()
@@ -136,13 +136,17 @@ function Copy-AccServerExe {
             foreach ($match in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw -Encoding UTF8), '"path"\s+"([^"]+)"')) { $libraries += ($match.Groups[1].Value -replace '\\\\', '\') }
         }
     }
+    # Выделенный сервер в Steam: «Инструменты» → Assetto Corsa Competizione Dedicated Server. Запасной вариант: папка server у самой игры.
     $server = $null
-    foreach ($library in @($libraries | Sort-Object -Unique)) {
-        $candidate = Join-Path $library 'steamapps\common\Assetto Corsa Competizione\server\accServer.exe'
-        if (Test-Path -LiteralPath $candidate) { $server = Get-Item -LiteralPath $candidate; break }
+    foreach ($folder in 'Assetto Corsa Competizione Dedicated Server', 'Assetto Corsa Competizione') {
+        foreach ($library in @($libraries | Sort-Object -Unique)) {
+            $candidate = Join-Path $library "steamapps\common\$folder\server\accServer.exe"
+            if (Test-Path -LiteralPath $candidate) { $server = Get-Item -LiteralPath $candidate; break }
+        }
+        if ($server) { break }
     }
     if (-not $server) {
-        Write-Warning 'accServer.exe не найден: ACC не установлен через Steam на этом компьютере. Программа сервера не запустит сервер.'
+        Write-Warning 'accServer.exe не найден: в Steam не установлен Assetto Corsa Competizione Dedicated Server (раздел «Инструменты»). Программа сервера не запустит сервер.'
         return
     }
     $copy = Join-Path $toolTarget 'accServer.exe'
