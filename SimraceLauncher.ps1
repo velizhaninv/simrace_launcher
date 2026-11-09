@@ -1287,8 +1287,10 @@ function Update-NetStatusCheck {
     if ($parts.Count -lt 4) { return }
 
     switch ($parts[0]) {
-        'ethernet' { $data = 'M3,4 H21 V15 H3 Z M8,20 H16 M12,15 V20'; $name = 'Подключено по кабелю' }
-        'wifi' { $data = 'M2,9 C8,3 16,3 22,9 M5.5,13 C9.5,9.5 14.5,9.5 18.5,13 M9,16.5 C10.8,15 13.2,15 15,16.5 M12,20 L12,20'; $name = 'Подключено по Wi-Fi' }
+        # Разъём сетевого кабеля: корпус, три контакта и провод
+        'ethernet' { $data = 'M6,3.5 H18 V13.5 H15 V16.5 H9 V13.5 H6 Z M9.5,6.5 V9 M12,6.5 V9 M14.5,6.5 V9 M12,16.5 V21'; $name = 'Подключено по кабелю' }
+        # Три дуги Wi-Fi и точка
+        'wifi' { $data = 'M2.5,9 C7.8,4 16.2,4 21.5,9 M5.8,12.4 C9.4,9.2 14.6,9.2 18.2,12.4 M9.1,15.8 C10.8,14.4 13.2,14.4 14.9,15.8 M11.2,19.5 A0.8,0.8 0 1 1 12.8,19.5 A0.8,0.8 0 1 1 11.2,19.5'; $name = 'Подключено по Wi-Fi' }
         default { $data = 'M4,4 L20,20 M20,4 L4,20'; $name = 'Нет подключения' }
     }
     $IconNet.Data = [System.Windows.Media.Geometry]::Parse($data)
@@ -4070,7 +4072,7 @@ function Submit-Decision([bool]$Lock) {
         <Border x:Name="StatusStrip" Margin="10,0,0,0" VerticalAlignment="Center" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="6">
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <Button x:Name="BtnStatusLang" Style="{StaticResource StatusButton}" FontSize="18" MinWidth="50" ToolTip="Язык ввода, нажми, чтобы сменить"/>
-            <Border x:Name="NetBox" Visibility="Collapsed" Padding="8,0" VerticalAlignment="Center" Background="Transparent">
+            <Border x:Name="NetBox" Padding="8,0" VerticalAlignment="Center" Background="Transparent" ToolTip="Подключение к сети">
               <Canvas Width="24" Height="24">
                 <Path x:Name="IconNet" Stroke="#6C6F73" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Data="M4,4 L20,20 M20,4 L4,20"/>
               </Canvas>
