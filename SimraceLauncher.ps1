@@ -4004,6 +4004,14 @@ function Submit-Decision([bool]$Lock) {
   <Grid>
     <Image x:Name="BackgroundImage" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
+    <!-- Номер кокпита: плашка у верхнего края экрана по центру, как вырез. Номер берётся из имени компьютера -->
+    <Border x:Name="PcBadge" HorizontalAlignment="Center" VerticalAlignment="Top" Background="#E61C1E21" BorderBrush="#3A3D42" BorderThickness="1,0,1,1"
+            CornerRadius="0,0,18,18" Padding="30,5,30,8" MinWidth="128">
+      <TextBlock HorizontalAlignment="Center" FontSize="20" FontWeight="SemiBold">
+        <Run Text="№" Foreground="{StaticResource Accent}"/><Run x:Name="RunPcNumber" Text="" Foreground="White"/>
+      </TextBlock>
+    </Border>
+
     <Grid Margin="56,30,56,0">
       <Grid.RowDefinitions>
         <RowDefinition Height="84"/>
@@ -4027,7 +4035,7 @@ function Submit-Decision([bool]$Lock) {
           </StackPanel>
         </Border>
 
-        <Viewbox x:Name="FeatureBox" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Viewbox x:Name="FeatureBox" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24,0,-24">
           <StackPanel Orientation="Horizontal">
             <StackPanel Orientation="Horizontal" Margin="0,0,56,0">
               <Viewbox Width="50" Height="50" Margin="0,0,18,0" VerticalAlignment="Center"><Canvas Width="48" Height="48">
@@ -4318,7 +4326,7 @@ function Submit-Decision([bool]$Lock) {
               </UniformGrid>
             </StackPanel>
           </Border>
-          <StackPanel VerticalAlignment="Bottom" Margin="0,0,32,0">
+          <StackPanel VerticalAlignment="Top" Margin="0,0,32,0">
             <TextBlock Text="Большакова, 99А" FontSize="18" FontWeight="SemiBold" TextAlignment="Right"/>
             <TextBlock Text="14 кокпитов, круглосуточно" FontSize="15" Foreground="{StaticResource Muted}" TextAlignment="Right" Margin="0,0,0,12"/>
             <TextBlock Text="Чернышевского, 4А" FontSize="18" FontWeight="SemiBold" TextAlignment="Right"/>
@@ -4699,7 +4707,7 @@ try {
     $script:GearButton = $null
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-    foreach ($name in 'BackgroundImage', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
+    foreach ($name in 'BackgroundImage', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
@@ -4735,6 +4743,9 @@ try {
     Initialize-DashPower
 
     $TxtComputer.Text = $env:COMPUTERNAME
+    # SIMRACE-14 → № 14. Если в имени нет номера, показываем имя целиком
+    $pcNumber = [regex]::Match($env:COMPUTERNAME, '(\d+)$')
+    $RunPcNumber.Text = ' ' + $(if ($pcNumber.Success) { [int]$pcNumber.Value } else { $env:COMPUTERNAME })
     $TxtClock.Text = (Get-Date).ToString('HH:mm')
 
     foreach ($entry in @($script:Config.apps)) {
