@@ -199,6 +199,29 @@ function Set-PageFileOnZ {
     Write-Log "Файл подкачки прописан: $wanted (было: $($current -join '; ')). Заработает после перезагрузки"
 }
 
+# Оверлей на диске 12 ГБ, пороги как в UWF-Panel: предупреждение при 2/3, критический при 90%.
+# Microsoft: размер дискового оверлея меняется только при выключенной защите, и на C: должно быть свободно больше нового размера.
+$script:OverlayMB = 12288
+function Get-NextOverlayConfig {
+    return (Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName UWF_OverlayConfig -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.CurrentSession } | Select-Object -First 1)
+}
+function Set-OverlaySize {
+    $next = Get-NextOverlayConfig
+    if ($next -and $next.MaximumSize -eq $script:OverlayMB) { return }
+    $free = (Get-Volume -DriveLetter $env:SystemDrive.TrimEnd(':') -ErrorAction SilentlyContinue).SizeRemaining / 1MB
+    if ($free -and $free -le $script:OverlayMB) {
+        Write-Log ("Оверлей оставлен {0} МБ: на {1} свободно {2:0} МБ, а для 12 ГБ нужно больше" -f $next.MaximumSize, $env:SystemDrive, $free)
+        return
+    }
+    & $script:Uwfmgr overlay set-size $script:OverlayMB | Out-Null
+    & $script:Uwfmgr overlay set-warningthreshold ([math]::Round($script:OverlayMB * 2 / 3)) | Out-Null
+    & $script:Uwfmgr overlay set-criticalthreshold ([math]::Round($script:OverlayMB * 0.9)) | Out-Null
+    $after = Get-NextOverlayConfig
+    if ($after -and $after.MaximumSize -eq $script:OverlayMB) { Write-Log "Оверлей после перезагрузки: $($script:OverlayMB) МБ (было $($next.MaximumSize))" }
+    else { Write-Log "Не удалось задать оверлей $($script:OverlayMB) МБ, сейчас на следующую загрузку: $($after.MaximumSize)" }
+}
+
 # Включение и выключение защиты: те же шаги и проверки, что в UWF-Panel
 function Set-Uwf([bool]$Enable) {
     $filter = Get-UwfFilter
@@ -215,6 +238,8 @@ function Set-Uwf([bool]$Enable) {
         if (-not $filter.CurrentEnabled -and (Test-Path -LiteralPath $page)) {
             Set-ItemProperty -Path $script:MemoryKey -Name PagingFiles -Type MultiString -Value @("$($script:PageDrive)\pagefile.sys $($script:PageFileMB) $($script:PageFileMB)")
         }
+        # 5. Размер оверлея 12 ГБ. Windows меняет его только при выключенной защите, вступает в силу после перезагрузки.
+        if (-not $filter.CurrentEnabled) { Set-OverlaySize }
         # Проверка результата
         $ok = (Get-UwfFilter).NextEnabled -and (Test-NextProtected $env:SystemDrive)
         if (Test-Path -LiteralPath $page) { $ok = $ok -and -not (Test-NextProtected $script:PageDrive) }
