@@ -27,6 +27,8 @@ $script:LauncherBusy = $false
 $script:LauncherSeen = [datetime]::MinValue
 $script:IdleNext = [datetime]::MinValue
 $script:ForceUpdate = $false
+$script:RestartSelf = $false
+$script:AgentHash = $(try { (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash } catch { '' })
 $script:LastBusy = ''
 $script:OverlayData = @{ ok = $true; enabled = $false; usedMb = 0; freeMb = 0 }
 
@@ -302,6 +304,11 @@ function Update-OverlayCache {
 
 # Вызывается раз в секунду, пока никто не подключён
 function Update-AgentState {
+    if ($script:RestartSelf) {
+        # Ответ на последнюю команду уже отправлен: выходим, через полминуты задание запустит новую версию
+        try { if ($script:Listener) { $script:Listener.Stop() } } catch { }
+        [Environment]::Exit(0)
+    }
     Update-OverlayCache
     Update-Network
     Update-WaitingUpdate
@@ -334,12 +341,30 @@ function Update-AgentState {
         }
         Request-LauncherRestart
         $script:State = 'idle'
+        Restart-AgentIfChanged
         return
     }
     $script:State = 'await-decision'
 }
 
 # ---------- Обновление по команде с администраторского компьютера ----------
+
+# После обновления без перезагрузки на диске уже новая служба, а работает старая.
+# Разовое задание запускает новую через 30 секунд, а эта служба завершается.
+function Restart-AgentIfChanged {
+    try {
+        if ((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash -eq $script:AgentHash) { return }
+        $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\schtasks.exe') -Argument '/Run /TN "\SIMRACE\SIMRACE Agent"'
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(30)
+        $trigger.EndBoundary = (Get-Date).AddMinutes(10).ToString('s')
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -DeleteExpiredTaskAfter (New-TimeSpan -Minutes 5)
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName 'SIMRACE Agent Restart' -TaskPath '\SIMRACE\' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+        Write-Log 'Служба обновилась: перезапускаю, чтобы заработала новая версия'
+        $script:RestartSelf = $true
+    }
+    catch { Write-Log "Новая версия службы заработает после перезагрузки: $_" }
+}
 
 # Лаунчер сам перезапустится, когда закончится сеанс
 function Request-LauncherRestart {
@@ -551,6 +576,7 @@ function Invoke-Request($Request) {
                 Restart-Pc
                 return @{ ok = $true; reboot = $true }
             }
+            Restart-AgentIfChanged
             return @{ ok = $true; reboot = $false }
         }
         default { throw 'Неизвестная команда.' }
