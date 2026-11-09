@@ -3669,11 +3669,12 @@ function Submit-Decision([bool]$Lock) {
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="5"/>
       <Setter Property="MinHeight" Value="62"/>
+      <Setter Property="Padding" Value="18,8"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#1C1E21" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="14" Padding="18,8">
+            <Border x:Name="Box" Background="#1C1E21" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="14" Padding="{TemplateBinding Padding}">
               <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -3691,6 +3692,21 @@ function Submit-Decision([bool]$Lock) {
           </ControlTemplate>
         </Setter.Value>
       </Setter>
+    </Style>
+
+    <!-- Компактная плитка: значок сверху, подпись снизу. Подпись всегда помещается целиком -->
+    <Style x:Key="AdminIconTile" TargetType="Button" BasedOn="{StaticResource AdminTile}">
+      <Setter Property="Padding" Value="6,12,6,10"/>
+      <Setter Property="MinHeight" Value="80"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="AdminIconLabel" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="Foreground" Value="#C9CCD0"/>
+      <Setter Property="HorizontalAlignment" Value="Center"/>
+      <Setter Property="TextAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="0,8,0,0"/>
     </Style>
 
     <Style x:Key="AdminPrimary" TargetType="Button">
@@ -4354,28 +4370,21 @@ function Submit-Decision([bool]$Lock) {
             </UniformGrid>
 
             <TextBlock Text="ЛАУНЧЕР" Style="{StaticResource AdminGroup}"/>
-            <Grid Margin="-5,0">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="92"/>
-                <ColumnDefinition Width="92"/>
-                <ColumnDefinition Width="92"/>
-                <ColumnDefinition Width="92"/>
-              </Grid.ColumnDefinitions>
-              <Button x:Name="BtnAdminSettings" Grid.Column="0" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M4,7 H20 M4,17 H20" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Ellipse Canvas.Left="12" Canvas.Top="4" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/><Ellipse Canvas.Left="6" Canvas.Top="14" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Настройки лаунчера" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnMinimizeLauncher" Grid.Column="1" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Свернуть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M5,19 H19" Stroke="White" StrokeThickness="2.4" StrokeStartLineCap="Round"/></Canvas><TextBlock Text="Свернуть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnRestartLauncher" Grid.Column="2" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Перезапустить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезапуск" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnAdminUpdate" Grid.Column="3" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Обновить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M5,20 H19" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Обновить" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnExit" Grid.Column="4" Style="{StaticResource AdminTile}" HorizontalContentAlignment="Center" ToolTip="Закрыть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/><Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Закрыть" FontSize="12" FontWeight="Normal" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Button>
-            </Grid>
+            <UniformGrid Columns="5" Margin="-5,0">
+              <Button x:Name="BtnAdminSettings" Style="{StaticResource AdminIconTile}" ToolTip="Настройки лаунчера"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M4,7 H20 M4,17 H20" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Ellipse Canvas.Left="12" Canvas.Top="4" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/><Ellipse Canvas.Left="6" Canvas.Top="14" Width="6" Height="6" Fill="#1C1E21" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Настройки" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnMinimizeLauncher" Style="{StaticResource AdminIconTile}" ToolTip="Свернуть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M5,19 H19" Stroke="White" StrokeThickness="2.4" StrokeStartLineCap="Round"/></Canvas><TextBlock Text="Свернуть" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnRestartLauncher" Style="{StaticResource AdminIconTile}" ToolTip="Перезапустить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезапуск" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnAdminUpdate" Style="{StaticResource AdminIconTile}" ToolTip="Обновить лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,4 V14 M7.5,10 L12,14.5 L16.5,10" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M5,20 H19" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Обновить" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnExit" Style="{StaticResource AdminIconTile}" ToolTip="Закрыть лаунчер"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="19" Height="19" Stroke="#E2450F" StrokeThickness="2"/><Path Data="M8.5,8.5 L15.5,15.5 M15.5,8.5 L8.5,15.5" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Закрыть" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+            </UniformGrid>
 
             <Button x:Name="BtnAdminFleet" Style="{StaticResource AdminTile}" Margin="0,10,0,0" Visibility="Collapsed"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="2" Canvas.Top="4" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="14" Canvas.Top="4" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="2" Canvas.Top="14" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="14" Canvas.Top="14" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Кокпиты клуба: состояние и обновление" VerticalAlignment="Center" Margin="12,0,0,0"/></StackPanel></Button>
 
             <TextBlock Text="КОМПЬЮТЕР" Style="{StaticResource AdminGroup}"/>
             <UniformGrid Columns="3" Margin="-5,0">
-              <Button x:Name="BtnAdminTaskMgr" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="3" Canvas.Top="4" Width="18" Height="16" RadiusX="3" RadiusY="3" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6,13 H9 L11,9 L13,16 L15,13 H18" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Диспетчер задач" VerticalAlignment="Center" Margin="12,0,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnAdminShutdown" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M12,3 V11" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6.8,6.8 A8,8 0 1 0 17.2,6.8" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Выключить ПК" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
-              <Button x:Name="BtnAdminReboot" Style="{StaticResource AdminTile}"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезагрузить ПК" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel></Button>
+              <Button x:Name="BtnAdminTaskMgr" Style="{StaticResource AdminTile}" Padding="14,8"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="3" Canvas.Top="4" Width="18" Height="16" RadiusX="3" RadiusY="3" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6,13 H9 L11,9 L13,16 L15,13 H18" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Диспетчер задач" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="16" TextTrimming="CharacterEllipsis"/></StackPanel></Button>
+              <Button x:Name="BtnAdminShutdown" Style="{StaticResource AdminTile}" Padding="14,8"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M12,3 V11" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6.8,6.8 A8,8 0 1 0 17.2,6.8" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Выключить ПК" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="16" TextTrimming="CharacterEllipsis"/></StackPanel></Button>
+              <Button x:Name="BtnAdminReboot" Style="{StaticResource AdminTile}" Padding="14,8"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезагрузить ПК" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="16" TextTrimming="CharacterEllipsis"/></StackPanel></Button>
             </UniformGrid>
 
             <DockPanel Margin="0,20,0,0">
