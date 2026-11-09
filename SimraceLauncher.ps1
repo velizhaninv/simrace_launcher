@@ -497,7 +497,7 @@ public static class SimraceNative
         }, IntPtr.Zero);
     }
 
-    // Закрывает главное окно Steam. Steam при этом продолжает работать в фоне.
+    // Закрывает главное окно Steam. Steam при этом продолжает работать в фоне. Небольшие диалоги Steam остаются.
     public static void CloseSteamMainWindow()
     {
         EnumWindows(delegate (IntPtr window, IntPtr parameter)
@@ -506,6 +506,10 @@ public static class SimraceNative
             StringBuilder title = new StringBuilder(64);
             GetWindowText(window, title, 64);
             if (title.ToString() != "Steam") return true;
+            // Диалоги Steam тоже называются «Steam»: выбор облачных или локальных сохранений, подтверждения.
+            // Их не трогаем, закрываем только большое главное окно.
+            RECT rect;
+            if (!GetWindowRect(window, out rect) || rect.Right - rect.Left < 900 || rect.Bottom - rect.Top < 600) return true;
             uint processId;
             GetWindowThreadProcessId(window, out processId);
             try
