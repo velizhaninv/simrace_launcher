@@ -251,6 +251,12 @@ function Update-OverlayCache {
     catch {
         $script:OverlayData = @{ ok = $true; enabled = $false; usedMb = 0; freeMb = 0 }
     }
+    # Файл подкачки, который работает прямо сейчас: путь и размер в МБ
+    try {
+        $pages = @(Get-CimInstance Win32_PageFileUsage -ErrorAction Stop | ForEach-Object { "$($_.Name)|$($_.AllocatedBaseSize)" })
+        $script:OverlayData.pages = $pages
+    }
+    catch { $script:OverlayData.pages = @() }
 }
 
 # Вызывается раз в секунду, пока никто не подключён

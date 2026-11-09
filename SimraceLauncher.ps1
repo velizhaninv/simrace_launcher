@@ -3384,8 +3384,47 @@ function Update-LockStatus {
 }
 
 # Заполненность оверлея UWF. Значения готовит служба, поэтому окно не подвисает на запросе к Windows.
+# Меню состояния у замка: защита, оверлей и файл подкачки
+function Update-SystemMenu($Data) {
+    $TxtSysUwf.Text = $TxtUwfState.Text
+    $LampSysUwf.Fill = $LampUwf.Fill
+    if (-not $Data -or -not $Data.ok) {
+        $TxtSysOverlay.Text = 'Служба лаунчера не отвечает'
+        $BarSysOverlay.Width = 0
+        $TxtSysPage.Text = 'Нет данных'
+        $LampSysPage.Fill = New-DeviceBrush '#55585C'
+        return
+    }
+    $total = [double]$Data.usedMb + [double]$Data.freeMb
+    if (-not $Data.enabled -or $total -le 0) {
+        $TxtSysOverlay.Text = 'Не используется: защита выключена'
+        $BarSysOverlay.Width = 0
+    }
+    else {
+        $part = [double]$Data.usedMb / $total
+        $BarSysOverlay.Width = [Math]::Round(278 * [Math]::Min(1, $part))
+        $BarSysOverlay.Fill = New-DeviceBrush $(if ($part -ge 0.9) { '#E5301A' } elseif ($part -ge 0.75) { '#FFB020' } else { '#37C552' })
+        $TxtSysOverlay.Text = 'Занято {0:0.0} из {1:0} ГБ, свободно {2:0.0} ГБ' -f ($Data.usedMb / 1024), ($total / 1024), ($Data.freeMb / 1024)
+    }
+    # Нормально: файл подкачки работает и лежит на диске Z:
+    $pages = @($Data.pages | Where-Object { $_ } | ForEach-Object {
+        $parts = ([string]$_).Split('|')
+        [pscustomobject]@{ Name = $parts[0]; Mb = [double]$parts[1] }
+    } | Where-Object { $_.Mb -gt 0 })
+    if ($pages.Count -eq 0) {
+        $TxtSysPage.Text = 'Не работает'
+        $LampSysPage.Fill = New-DeviceBrush '#E5301A'
+        return
+    }
+    $TxtSysPage.Text = (@($pages | ForEach-Object { '{0}  {1:0.0} ГБ' -f $_.Name.Substring(0, 2), ($_.Mb / 1024) }) -join ', ')
+    $onZ = @($pages | Where-Object { $_.Name -like 'Z:*' }).Count -gt 0
+    $LampSysPage.Fill = New-DeviceBrush $(if ($onZ) { '#37C552' } else { '#FFB020' })
+    if (-not $onZ) { $TxtSysPage.Text += ' (не на диске Z:)' }
+}
+
 function Update-OverlayGauge {
     $data = Get-AgentShared 'Overlay'
+    Update-SystemMenu $data
     if (-not $data -or -not $data.ok -or -not $data.enabled) {
         $OverlayStrip.Visibility = 'Collapsed'
         return
@@ -3403,6 +3442,13 @@ function Update-OverlayGauge {
     $TxtOverlayFree.Text = '{0:0.0} ГБ свободно из {1:0} ГБ' -f ($free / 1024), ($total / 1024)
     $TxtOverlayFree.Foreground = New-DeviceBrush $(if ($part -ge 0.9) { '#FF6A55' } else { '#FFFFFF' })
     $OverlayStrip.Visibility = 'Visible'
+}
+
+# Щелчок по замку открывает меню. Повторный щелчок закрывает: меню само закрылось при нажатии, не открываем его снова.
+function Switch-SystemMenu {
+    if (((Get-Date) - $script:SystemMenuClosedAt).TotalMilliseconds -lt 300) { return }
+    Update-SystemMenu (Get-AgentShared 'Overlay')
+    $SystemMenu.IsOpen = $true
 }
 
 # Индикатор Caps Lock рядом с раскладкой
@@ -3932,13 +3978,34 @@ function Submit-Decision([bool]$Lock) {
             <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="6,0"/>
             <StackPanel x:Name="StatusLinks" Orientation="Horizontal"/>
             <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="6,0"/>
-            <StackPanel x:Name="LockBox" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Background="Transparent" ToolTip="Состояние защиты неизвестно">
+            <StackPanel x:Name="LockBox" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0" Background="Transparent" Cursor="Hand" ToolTip="Состояние системы">
               <Canvas Width="24" Height="24" VerticalAlignment="Center">
                 <Rectangle Canvas.Left="5" Canvas.Top="11" Width="14" Height="10" RadiusX="2.2" RadiusY="2.2" Fill="White"/>
                 <Path x:Name="IconLock" Data="M8,11 V7.5 A4,4 0 0 1 16,7.5 V11" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
               </Canvas>
               <Ellipse x:Name="LampLock" Width="10" Height="10" Fill="#55585C" VerticalAlignment="Center" Margin="8,0,0,0"/>
+              <Path Data="M0,0 L4.5,4.5 L9,0" Stroke="#A2A6AB" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" VerticalAlignment="Center" Margin="8,2,0,0"/>
             </StackPanel>
+            <Popup x:Name="SystemMenu" PlacementTarget="{Binding ElementName=LockBox}" Placement="Bottom" HorizontalOffset="-250" VerticalOffset="14" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+              <Border Width="320" Background="#F7141518" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="14" Padding="20,16,20,18">
+                <StackPanel>
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                    <Ellipse x:Name="LampSysUwf" Width="10" Height="10" Fill="#55585C" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock x:Name="TxtSysUwf" Text="Состояние защиты неизвестно" FontSize="16" FontWeight="SemiBold"/>
+                  </StackPanel>
+                  <TextBlock Text="OVERLAY" FontSize="12" FontWeight="SemiBold" Foreground="#7C8085" Margin="0,0,0,6"/>
+                  <Border Height="8" Background="#26282C" CornerRadius="4" ClipToBounds="True">
+                    <Rectangle x:Name="BarSysOverlay" Width="0" HorizontalAlignment="Left" Fill="#37C552" RadiusX="3" RadiusY="3"/>
+                  </Border>
+                  <TextBlock x:Name="TxtSysOverlay" Text="Нет данных" FontSize="15" Foreground="{StaticResource Soft}" Margin="0,6,0,14"/>
+                  <TextBlock Text="ФАЙЛ ПОДКАЧКИ" FontSize="12" FontWeight="SemiBold" Foreground="#7C8085" Margin="0,0,0,6"/>
+                  <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="LampSysPage" Width="10" Height="10" Fill="#55585C" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock x:Name="TxtSysPage" Text="Нет данных" FontSize="15" Foreground="{StaticResource Soft}" TextWrapping="Wrap" MaxWidth="250"/>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </Popup>
           </StackPanel>
         </Border>
         </StackPanel>
@@ -4461,6 +4528,7 @@ try {
     $script:NoticeApp = $null
     $script:DeviceWatch = $null
     $script:AgentShared = $null
+    $script:SystemMenuClosedAt = [datetime]::MinValue
     $script:AxisDevices = @()
     $script:AxisInvert = @{}
     $script:AxisNextScan = [datetime]::MinValue
@@ -4514,7 +4582,7 @@ try {
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'SystemMenu', 'LampSysUwf', 'TxtSysUwf', 'BarSysOverlay', 'TxtSysOverlay', 'LampSysPage', 'TxtSysPage', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
@@ -4666,6 +4734,8 @@ try {
     $AdminPanel.Add_PreviewMouseDown({ $script:AdminLastUse = Get-Date })
 
     $BtnInfoOk.Add_Click({ Hide-GameInfo })
+    $LockBox.Add_MouseLeftButtonUp({ Switch-SystemMenu })
+    $SystemMenu.Add_Closed({ $script:SystemMenuClosedAt = Get-Date })
     # Щелчок мимо карточки тоже закрывает описание
     $InfoPanel.Add_MouseLeftButtonUp({
         param($sender, $e)
