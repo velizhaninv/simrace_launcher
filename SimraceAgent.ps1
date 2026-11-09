@@ -347,20 +347,10 @@ function Request-LauncherRestart {
     catch { Write-Log "Запрос перезапуска лаунчера не записан: $_" }
 }
 
-# Запущенная игра: процессы из папок Steam и iRacing
-function Get-RunningGame {
-    try {
-        return (@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ExecutablePath -match '(?i)\\steamapps\\common\\|\\iRacingSim' } |
-            ForEach-Object { $_.Name -replace '\.exe$', '' } | Sort-Object -Unique) -join ', ')
-    }
-    catch { return '' }
-}
-
 # Чем занят кокпит. Пустая строка: свободен.
+# Ограничитель один: сеанс в лаунчере. Сеанс завершён — можно обновлять.
 function Get-BusyReason {
     if ($script:LauncherBusy -and ((Get-Date) - $script:LauncherSeen).TotalSeconds -lt 15) { return 'идёт сеанс' }
-    $game = Get-RunningGame
-    if ($game) { return "игра: $game" }
     return ''
 }
 

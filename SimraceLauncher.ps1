@@ -4858,8 +4858,8 @@ try {
             Update-Fact
             if ($script:TickCount % 20 -eq 1) { Update-OverlayGauge }
             if ($script:TickCount % 4 -eq 2) { Test-RestartRequest }
-            # Для обновления по сети: служба дождётся конца сеанса и игры
-            if ($script:AgentShared) { $script:AgentShared.Busy = [bool]($script:Session -or $script:TimerState -ne 'idle') }
+            # Для обновления по сети: служба дождётся конца сеанса
+            if ($script:AgentShared) { $script:AgentShared.Busy = [bool]($script:Config.requireSession -ne $false -and $script:TimerState -ne 'idle') }
             if ($script:TickCount % 6 -eq 0) {
                 Update-AgentStatus
                 Update-LockStatus
