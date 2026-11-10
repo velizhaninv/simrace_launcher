@@ -585,6 +585,51 @@ function Set-WakeOnLan {
     }
 }
 
+# ---------- Обновления игр в Steam ----------
+# У каждой установленной игры ставим «Обновлять игру только при её запуске» (AutoUpdateBehavior = 1),
+# чтобы Steam не качал обновления в фоне и не заполнял overlay при включённой защите.
+# Пишем только при выключенной защите и закрытом Steam: иначе изменения пропадут или Steam их перезапишет.
+function Set-SteamUpdateOnLaunch {
+    $filter = Get-UwfFilter
+    if ($filter -and $filter.CurrentEnabled) { return }
+    if (Get-Process -Name steam -ErrorAction SilentlyContinue) {
+        Write-Log 'Обновления Steam: Steam запущен, настройку игр пропускаю до следующей загрузки'
+        return
+    }
+    $roots = @()
+    foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam') {
+        $value = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).InstallPath
+        if ($value) { $roots += $value }
+    }
+    $libraries = @()
+    foreach ($root in $roots) {
+        $libraries += $root
+        $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
+        if (Test-Path -LiteralPath $vdf) {
+            foreach ($match in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw -Encoding UTF8), '"path"\s+"([^"]+)"')) { $libraries += ($match.Groups[1].Value -replace '\\\\', '\') }
+        }
+    }
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $changed = 0
+    $total = 0
+    foreach ($library in @($libraries | Sort-Object -Unique)) {
+        $apps = Join-Path $library 'steamapps'
+        if (-not (Test-Path -LiteralPath $apps)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $apps -Filter 'appmanifest_*.acf' -File -ErrorAction SilentlyContinue)) {
+            $total++
+            try {
+                $text = [System.IO.File]::ReadAllText($file.FullName, $encoding)
+                if ($text -notmatch '"AutoUpdateBehavior"\s+"(\d+)"' -or $Matches[1] -eq '1') { continue }
+                $text = [regex]::Replace($text, '("AutoUpdateBehavior"\s+")\d+(")', '${1}1${2}')
+                [System.IO.File]::WriteAllText($file.FullName, $text, $encoding)
+                $changed++
+            }
+            catch { Write-Log "Обновления Steam: не изменён $($file.Name): $_" }
+        }
+    }
+    if ($changed -gt 0) { Write-Log "Обновления Steam: игр переведено на «только при запуске»: $changed из $total" }
+}
+
 function Test-AdminSource([System.Net.IPAddress]$Remote) {
     if (-not $Remote) { return $false }
     if ($Remote.IsIPv4MappedToIPv6) { $Remote = $Remote.MapToIPv4() }
@@ -828,6 +873,8 @@ try { Set-OverlaySize }
 catch { Write-Log "Ошибка настройки overlay: $_" }
 try { Set-WakeOnLan }
 catch { Write-Log "Ошибка настройки Wake-on-LAN: $_" }
+try { Set-SteamUpdateOnLaunch }
+catch { Write-Log "Ошибка настройки обновлений Steam: $_" }
 
 # Сетевые команды из локальной сети
 try {
