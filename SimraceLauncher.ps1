@@ -1099,6 +1099,7 @@ function Restore-LauncherWindow {
 
 function Stop-Session {
     Hide-GameBar
+    Add-GameRecord $script:Session
     $script:Session = $null
     Start-LedAmbient
     $Overlay.Visibility = 'Collapsed'
@@ -1107,6 +1108,7 @@ function Stop-Session {
 
 function Stop-SessionWithError([string]$Title, [string]$Text) {
     Hide-GameBar
+    Add-GameRecord $script:Session
     $script:Session = $null
     Start-LedAmbient
     Show-Overlay $Title $Text 'Закрыть'
@@ -1298,6 +1300,10 @@ function Update-NetStatusCheck {
     $IconNet.Stroke = New-DeviceBrush $(if ($parts[0] -eq 'none') { '#E5301A' } elseif ($hasInternet) { '#FFFFFF' } else { '#E9C62A' })
     $NetBox.ToolTip = $(if ($parts[0] -ne 'none' -and -not $hasInternet) { "$name, но интернета нет" } else { $name })
     $TxtNet.Text = $short
+    # Для окна «Кокпиты»: тип подключения, интернет, VPN
+    $script:HealthNet = $parts[0]
+    $script:HealthInternet = $hasInternet
+    $script:HealthVpn = $parts[3]
 
     $colors = @{ on = '#37C552'; idle = '#A2A6AB'; off = '#E5301A' }
     if ($script:StatusLamps['radmin']) { $script:StatusLamps['radmin'].Fill = New-DeviceBrush $colors[$parts[2]] }
@@ -1487,7 +1493,7 @@ function Start-App($App, [bool]$ChooseAccount = $false) {
     $script:CancelledLaunch = $null
     $Account = $App.Account
     $script:GameWindow = [IntPtr]::Zero
-    $script:Session = @{ App = $App; Account = $Account; ChooseAccount = $ChooseAccount; Process = $null; Stage = 'running'; StageStart = Get-Date; Seen = $false; Misses = 0; ExeNames = $null; GamePid = 0; Forced = $false; GameUp = $false; GoneTicks = 0; FsWindow = [IntPtr]::Zero; FsTries = 0; FsOff = $false; BarShown = $false; HostUntil = [datetime]::MinValue; AskedInSteam = $false; PickerSeen = $false; PickerGone = 0; SteamGone = 0 }
+    $script:Session = @{ App = $App; GameStart = Get-Date; Account = $Account; ChooseAccount = $ChooseAccount; Process = $null; Stage = 'running'; StageStart = Get-Date; Seen = $false; Misses = 0; ExeNames = $null; GamePid = 0; Forced = $false; GameUp = $false; GoneTicks = 0; FsWindow = [IntPtr]::Zero; FsTries = 0; FsOff = $false; BarShown = $false; HostUntil = [datetime]::MinValue; AskedInSteam = $false; PickerSeen = $false; PickerGone = 0; SteamGone = 0 }
     Show-Waiting "Запускается $($App.Name)" 'Подожди немного.' 'Отменить запуск'
     Stop-BootGuard
     # Лаунчер уходит под все окна, поэтому сначала сворачиваем посторонние: Mumble, Проводник и другие
@@ -2222,7 +2228,9 @@ function Stop-ClubSession {
     }
     $script:EndArmedUntil = [datetime]::MinValue
     $BtnEndSession.Content = 'Завершить'
-    $total = Format-Elapsed (Get-SessionElapsed)
+    $active = Get-SessionElapsed
+    $total = Format-Elapsed $active
+    Add-StatRecord @{ kind = 'session'; start = $script:TimerStart.ToString('o'); minutes = [Math]::Round($active.TotalMinutes, 1); wallMinutes = [Math]::Round(((Get-Date) - $script:TimerStart).TotalMinutes, 1) }
     $TxtLastSession.Text = "Прошлый сеанс: $total, начат в $($script:TimerStart.ToString('HH:mm'))"
     Write-Log "Сеанс завершён: $total"
     $script:TimerState = 'idle'
@@ -2291,6 +2299,7 @@ function Update-Devices {
             if ($null -eq $power) { $power = $present }     # первое устройство в списке это база
         }
         if ($null -ne $power) { Set-DashPower $power }
+        $script:HealthBase = $power
         # Со слежением за подключением хватает редкой контрольной проверки
         $seconds = if ($script:DeviceWatch) { 15 } elseif ($script:Config.deviceCheckSeconds) { [double]$script:Config.deviceCheckSeconds } else { 2 }
         $script:DeviceNext = (Get-Date).AddSeconds($seconds)
@@ -2529,6 +2538,11 @@ function Hide-GameInfo {
 
 # Рекомендуемые рули на карточке игры: картинки wheel-<id>.png рядом с лаунчером
 $script:WheelNames = @{ nardi = @('NARDI', 'Nardi'); cs = @('CS', 'MOZA CS'); ks = @('KS', 'MOZA KS') }
+$script:WheelHints = @{
+    nardi = 'обычный круглый руль Nardi, диаметр 35 см, без кнопок и подрулевых переключателей'
+    cs = 'стандартный круглый руль MOZA CS, универсальный, с кнопками, диаметр 33 см'
+    ks = '«штурвал» MOZA KS для кольцевых дисциплин'
+}
 $script:WheelImages = @{}
 function Get-WheelImage([string]$Id) {
     if ($script:WheelImages.ContainsKey($Id)) { return $script:WheelImages[$Id] }
@@ -2576,11 +2590,14 @@ function New-WheelBadges($App) {
         $image.Width = 40
         $image.Height = 40
         $image.Margin = New-Object System.Windows.Thickness(0, 0, 6, 0)
-        $image.ToolTip = "Рекомендуемый руль: $($names[1])"
         [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($image, [System.Windows.Media.BitmapScalingMode]::HighQuality)
         [void]$panel.Children.Add($image)
     }
     if ($panel.Children.Count -eq 0) { return $null }
+    # Одна подсказка на все рули игры: наводишь на любой и видишь весь список
+    $lines = @(@($App.Wheels) | Where-Object { $script:WheelHints[[string]$_] } | ForEach-Object { '•  ' + $script:WheelHints[[string]$_] })
+    $panel.ToolTip = "Рекомендуем использовать:`n" + ($lines -join "`n")
+    $panel.Background = [System.Windows.Media.Brushes]::Transparent
     return $panel
 }
 
@@ -3525,6 +3542,7 @@ function Close-Launcher([int]$Code) {
 
 function Start-AgentPoller {
     $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false; Busy = $false; Latest = ''; Line = ''
+        Records = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
         VersionUrl = 'https://raw.githubusercontent.com/velizhaninv/simrace_launcher/main/version.txt' })
     $ps = [powershell]::Create()
     [void]$ps.AddScript({
@@ -3558,6 +3576,11 @@ function Start-AgentPoller {
             # Строку с отчётом готовит окно лаунчера: сеанс, игра, громкость
             $Shared.Status = Send-Line $(if ($Shared.Line) { [string]$Shared.Line } elseif ($Shared.Busy) { '{"action":"status","session":true}' } else { '{"action":"status","session":false}' })
             if ($tick % 5 -eq 0) { $Shared.Overlay = Send-Line '{"action":"overlay"}' }
+            # Записи для статистики: отправляем по очереди, пока служба принимает
+            while ($Shared.Records.Count -gt 0) {
+                $answer = Send-Line ([string]$Shared.Records[0])
+                if ($answer -and $answer -match '"ok"\s*:\s*true') { $Shared.Records.RemoveAt(0) } else { break }
+            }
             $tick++
             Start-Sleep -Seconds 2
         }
@@ -3566,9 +3589,28 @@ function Start-AgentPoller {
     [void]$ps.BeginInvoke()
 }
 
+# ---------- Статистика сеансов ----------
+# Сеанс: от «Начать сеанс» до «Завершить», вместе с настройкой. Игра: от запуска до закрытия.
+function Add-StatRecord([hashtable]$Data) {
+    if (-not $script:AgentShared) { return }
+    $Data.action = 'record'
+    [void]$script:AgentShared.Records.Add(($Data | ConvertTo-Json -Compress))
+}
+
+function Add-GameRecord($Session) {
+    if (-not $Session -or -not $Session.GameStart -or -not ($Session.Seen -or $Session.GameUp)) { return }
+    $minutes = [Math]::Round(((Get-Date) - $Session.GameStart).TotalMinutes, 1)
+    if ($minutes -lt 0.5) { return }
+    Add-StatRecord @{ kind = 'game'; game = [string]$Session.App.Name; start = $Session.GameStart.ToString('o'); minutes = $minutes }
+}
+
 # ---------- Отчёт для окна «Кокпиты» и громкость с SIMRACE-14 ----------
 
 $script:VolumeAck = ''
+$script:HealthNet = ''
+$script:HealthInternet = $null
+$script:HealthVpn = ''
+$script:HealthBase = $null
 
 # Громкость звуковой группы: если программа сейчас молчит, отдаём выбранное значение
 function Get-ReportVolume([string]$Group, $Chosen) {
@@ -3607,6 +3649,10 @@ function Update-AgentReport {
         start = $(if ($active) { $script:TimerStart.ToString('HH:mm') } else { '' })
         elapsed = $(if ($active) { [int](Get-SessionElapsed).TotalSeconds } else { 0 })
         volAck = $script:VolumeAck
+        net = [string]$script:HealthNet
+        internet = $script:HealthInternet
+        vpn = [string]$script:HealthVpn
+        base = $script:HealthBase
     }
     if ($script:AudioReady) {
         try {

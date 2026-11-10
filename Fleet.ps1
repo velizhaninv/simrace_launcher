@@ -130,6 +130,7 @@ $script:QueryScript = {
     <!-- Над списком: выбор кокпитов и обновление списка -->
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
       <Button x:Name="BtnRefresh" DockPanel.Dock="Right" Content="↻  Обновить список" Style="{StaticResource Link}" Margin="0"/>
+      <Button x:Name="BtnStats" DockPanel.Dock="Right" Content="Статистика сеансов" Style="{StaticResource Link}" Margin="0,0,6,0"/>
       <TextBlock x:Name="TxtLatest" DockPanel.Dock="Right" FontSize="14" Foreground="#7C8085" VerticalAlignment="Center" Margin="0,0,14,0"/>
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <TextBlock Text="Выбрать:" Foreground="#7C8085" FontSize="15" VerticalAlignment="Center" Margin="2,0,6,0"/>
@@ -147,6 +148,7 @@ $script:QueryScript = {
         <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
         <Button x:Name="BtnUnlock" Content="Разблокировать" Style="{StaticResource Danger}"/>
         <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
+        <Button x:Name="BtnWake" Content="Включить" Style="{StaticResource Btn}" ToolTip="Включить выключенные кокпиты по сети (Wake-on-LAN)"/>
         <Button x:Name="BtnShutdown" Content="Выключить" Style="{StaticResource Btn}"/>
       </UniformGrid>
     </StackPanel>
@@ -163,12 +165,21 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
 # Галочка, кокпит, связь, версия, защита, overlay, файл подкачки, сеанс, сейчас, громкость
-$script:Widths = @(40, 130, 100, 130, 110, 130, 140, 190, 0, 60)
+$script:Widths = @(40, 130, 150, 130, 110, 130, 140, 190, 0, 60)
+# Значки состояния, сетка 22×22
+$script:HealthIcons = @{
+    internet = 'M11,3 A8,8 0 1 0 11.01,3 Z M3,11 H19 M11,3 C7.5,6.5 7.5,15.5 11,19 M11,3 C14.5,6.5 14.5,15.5 11,19'
+    net = 'M3,5 H19 V15 H15 V18.5 H7 V15 H3 Z M7,8.5 V11 M10,8.5 V11 M12,8.5 V11 M15,8.5 V11'
+    wifi = 'M2,8.5 C6.8,4 15.2,4 20,8.5 M5,11.6 C8.3,8.7 13.7,8.7 17,11.6 M8,14.7 C9.7,13.4 12.3,13.4 14,14.7 M10.3,18 A0.7,0.7 0 1 1 11.7,18 A0.7,0.7 0 1 1 10.3,18'
+    base = 'M11,3 A8,8 0 1 0 11.01,3 Z M11,9 A2,2 0 1 0 11.01,9 Z M3.2,10 L9,11 M18.8,10 L13,11 M11,13 V19'
+    vpn = 'M11,2.5 L18,5.5 V10.5 C18,14.8 15,18 11,19.5 C7,18 4,14.8 4,10.5 V5.5 Z'
+}
+
 function New-Brush([string]$Color) { return (New-Object System.Windows.Media.BrushConverter).ConvertFromString($Color) }
 
 function New-Cell([System.Windows.Controls.Grid]$Grid, [int]$Column, [string]$Text, [string]$Color = '#FFFFFF', [bool]$Bold = $false) {
@@ -198,7 +209,7 @@ function New-RowGrid {
 $header = New-RowGrid
 $header.Margin = New-Object System.Windows.Thickness(0, 6, 0, 8)
 $column = 1
-foreach ($title in 'КОКПИТ', 'СВЯЗЬ', 'ВЕРСИЯ', 'ЗАЩИТА', 'OVERLAY', 'ФАЙЛ ПОДКАЧКИ', 'СЕАНС', 'СЕЙЧАС', 'ЗВУК') {
+foreach ($title in 'КОКПИТ', 'СОСТОЯНИЕ', 'ВЕРСИЯ', 'ЗАЩИТА', 'OVERLAY', 'ФАЙЛ ПОДКАЧКИ', 'СЕАНС', 'СЕЙЧАС', 'ЗВУК') {
     $cell = New-Cell $header $column $title '#7C8085' $true
     $cell.FontSize = 12
     $column++
@@ -237,6 +248,7 @@ foreach ($name in $script:Names) {
     $row = [pscustomobject]@{
         Name = $name; Check = $check; Online = $false; Version = ''; Busy = $false; State = ''; Pending = ''; BusyText = ''
         Link = (New-Cell $grid 2 '...' '#A2A6AB')
+        Health = $null
         Ver = (New-Cell $grid 3 '')
         Uwf = (New-Cell $grid 4 '')
         Over = (New-Cell $grid 5 '')
@@ -264,6 +276,34 @@ foreach ($name in $script:Names) {
     [System.Windows.Controls.Grid]::SetColumn($volumeButton, 9)
     [void]$grid.Children.Add($volumeButton)
     $row | Add-Member -NotePropertyName VolumeButton -NotePropertyValue $volumeButton
+    # Значки состояния: интернет, кабель или Wi-Fi, база MOZA, VPN. Видны, когда кокпит на связи.
+    $health = New-Object System.Windows.Controls.StackPanel
+    $health.Orientation = 'Horizontal'
+    $health.Margin = New-Object System.Windows.Thickness(6, 0, 0, 0)
+    $health.VerticalAlignment = 'Center'
+    $health.Visibility = 'Collapsed'
+    $icons = @{}
+    foreach ($key in 'internet', 'net', 'base', 'vpn') {
+        $icon = New-Object System.Windows.Shapes.Path
+        $icon.Width = 22
+        $icon.Height = 22
+        $icon.Stretch = 'None'
+        $icon.StrokeThickness = 1.7
+        $icon.StrokeStartLineCap = 'Round'
+        $icon.StrokeEndLineCap = 'Round'
+        $icon.StrokeLineJoin = 'Round'
+        $icon.Margin = New-Object System.Windows.Thickness(0, 0, 8, 0)
+        $icon.Data = [System.Windows.Media.Geometry]::Parse($script:HealthIcons[$key])
+        $icon.Stroke = New-Brush '#5A5E63'
+        $holder = New-Object System.Windows.Controls.Border
+        $holder.Background = [System.Windows.Media.Brushes]::Transparent
+        $holder.Child = $icon
+        [void]$health.Children.Add($holder)
+        $icons[$key] = $holder
+    }
+    [System.Windows.Controls.Grid]::SetColumn($health, 2)
+    [void]$grid.Children.Add($health)
+    $row.Health = @{ Panel = $health; Icons = $icons }
     # Имя кокпита краснеет, когда защита выключена: такой кокпит нужно заблокировать обратно
     $row | Add-Member -NotePropertyName NameCell -NotePropertyValue (New-Cell $grid 1 $name '#FFFFFF' $true)
     $border.Child = $grid
@@ -271,11 +311,123 @@ foreach ($name in $script:Names) {
     $script:RowMap[$name] = $row
 }
 
+# Значки состояния: зелёный в порядке, красный проблема, серый выключено или неизвестно
+function Show-Health($Row, $Data) {
+    $session = $Data.session
+    $Row.Link.Visibility = 'Collapsed'
+    $Row.Health.Panel.Visibility = 'Visible'
+    $green = '#37C552'; $red = '#E5301A'; $yellow = '#E9C62A'; $grey = '#5A5E63'
+    $icons = $Row.Health.Icons
+    function Set-HealthIcon($Holder, [string]$Color, [string]$Tip, [string]$Shape = '') {
+        $Holder.Child.Stroke = New-Brush $Color
+        if ($Shape) { $Holder.Child.Data = [System.Windows.Media.Geometry]::Parse($script:HealthIcons[$Shape]) }
+        $Holder.ToolTip = $Tip
+    }
+    if (-not $session) {
+        # Лаунчер не отвечает: служба на связи, но состояние неизвестно
+        foreach ($key in $icons.Keys) { Set-HealthIcon $icons[$key] $grey 'Лаунчер не запущен: состояние неизвестно' }
+        return
+    }
+    if ($null -eq $session.internet) { Set-HealthIcon $icons['internet'] $grey 'Интернет: ещё не проверен' }
+    elseif ($session.internet) { Set-HealthIcon $icons['internet'] $green 'Интернет есть' }
+    else { Set-HealthIcon $icons['internet'] $red 'Интернета нет' }
+    switch ([string]$session.net) {
+        'ethernet' { Set-HealthIcon $icons['net'] $green 'Подключено по кабелю' 'net' }
+        'wifi' { Set-HealthIcon $icons['net'] $yellow 'Подключено по Wi-Fi: включение по сети не сработает' 'wifi' }
+        'none' { Set-HealthIcon $icons['net'] $red 'Нет подключения к сети' 'net' }
+        default { Set-HealthIcon $icons['net'] $grey 'Подключение: ещё не проверено' 'net' }
+    }
+    if ($null -eq $session.base) { Set-HealthIcon $icons['base'] $grey 'База MOZA: ещё не проверена' }
+    elseif ($session.base) { Set-HealthIcon $icons['base'] $green 'База MOZA подключена' }
+    else { Set-HealthIcon $icons['base'] $red 'База MOZA не найдена' }
+    switch ([string]$session.vpn) {
+        'on' { Set-HealthIcon $icons['vpn'] $green 'VPN включён' }
+        'idle' { Set-HealthIcon $icons['vpn'] $yellow 'VPN запущен, но не подключён' }
+        'off' { Set-HealthIcon $icons['vpn'] $grey 'VPN выключен' }
+        default { Set-HealthIcon $icons['vpn'] $grey 'VPN: ещё не проверен' }
+    }
+}
+
+# ---------- Включение по сети ----------
+
+$script:MacFile = $(if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\fleet-macs.json' } else { Join-Path $env:ProgramData 'SIMRACE\fleet-macs.json' })
+$script:Macs = @{}
+try {
+    if (Test-Path -LiteralPath $script:MacFile) {
+        $saved = Get-Content -LiteralPath $script:MacFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($property in $saved.PSObject.Properties) { $script:Macs[$property.Name] = @($property.Value) }
+    }
+}
+catch { }
+
+function Save-Macs {
+    try {
+        $folder = Split-Path -Parent $script:MacFile
+        if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+        Set-Content -LiteralPath $script:MacFile -Value ($script:Macs | ConvertTo-Json -Compress) -Encoding UTF8
+    }
+    catch { }
+}
+
+# «Магический пакет»: 6 байт 0xFF и 16 раз MAC. Шлём на широковещательные адреса всех проводных и беспроводных сетей.
+function Send-WakePacket([string]$Mac) {
+    $bytes = [byte[]]@($Mac -split '[-:]' | ForEach-Object { [Convert]::ToByte($_, 16) })
+    if ($bytes.Count -ne 6) { throw "Неверный MAC: $Mac" }
+    $packet = [byte[]](@(0xFF) * 6 + (@($bytes) * 16))
+    $targets = @('255.255.255.255')
+    foreach ($nic in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+        if ($nic.OperationalStatus -ne 'Up' -or $nic.NetworkInterfaceType -eq 'Loopback') { continue }
+        foreach ($address in $nic.GetIPProperties().UnicastAddresses) {
+            if ($address.Address.AddressFamily -ne 'InterNetwork' -or -not $address.IPv4Mask) { continue }
+            $ip = $address.Address.GetAddressBytes()
+            $mask = $address.IPv4Mask.GetAddressBytes()
+            $broadcast = for ($i = 0; $i -lt 4; $i++) { $ip[$i] -bor ($mask[$i] -bxor 255) }
+            $targets += ($broadcast -join '.')
+        }
+    }
+    $client = New-Object System.Net.Sockets.UdpClient
+    try {
+        $client.EnableBroadcast = $true
+        foreach ($target in @($targets | Sort-Object -Unique)) {
+            foreach ($port in 9, 7) { [void]$client.Send($packet, $packet.Length, $target, $port) }
+        }
+    }
+    finally { $client.Close() }
+}
+
+function Start-Wake {
+    $selected = @($script:Names | Where-Object { $script:RowMap[$_].Check.IsChecked })
+    if ($selected.Count -eq 0) {
+        $TxtStatus.Text = 'Отметь выключенные кокпиты галочками.'
+        return
+    }
+    $sent = @(); $online = @(); $unknown = @()
+    foreach ($name in $selected) {
+        if ($script:RowMap[$name].Online) { $online += $name; continue }
+        $macs = @($script:Macs[$name] | Where-Object { $_ })
+        if ($macs.Count -eq 0) { $unknown += $name; continue }
+        try {
+            foreach ($mac in $macs) { Send-WakePacket $mac }
+            $sent += $name
+        }
+        catch { $unknown += "$name ($($_.Exception.Message))" }
+    }
+    $parts = @()
+    if ($sent.Count -gt 0) { $parts += "Сигнал включения отправлен: $($sent -join ', '). Кокпиты появятся на связи через 1–2 минуты." }
+    if ($online.Count -gt 0) { $parts += "Уже включены: $($online -join ', ')." }
+    if ($unknown.Count -gt 0) { $parts += "Адрес сетевой карты неизвестен: $($unknown -join ', '). Включи их один раз вручную, при следующем опросе адрес запомнится." }
+    $TxtStatus.Text = $parts -join ' '
+    $script:StatusHold = (Get-Date).AddSeconds(30)
+    foreach ($name in $sent) { $script:RowMap[$name].Check.IsChecked = $false }
+}
+
 function Show-Result($Row, $Answer, [string]$Latest) {
     $data = $null
     if ($Answer) { try { $data = $Answer | ConvertFrom-Json } catch { } }
     if (-not $data -or -not $data.ok) {
         $Row.Online = $false
+        $Row.Health.Panel.Visibility = 'Collapsed'
+        $Row.Link.Visibility = 'Visible'
         $Row.Link.Text = 'нет связи'
         $Row.Link.Foreground = New-Brush '#E5301A'
         foreach ($cell in $Row.Ver, $Row.Uwf, $Row.Over, $Row.Page, $Row.Session, $Row.Now) { $cell.Text = '' }
@@ -288,8 +440,13 @@ function Show-Result($Row, $Answer, [string]$Latest) {
     }
     $Row.Online = $true
     $Row.Version = [string]$data.version
-    $Row.Link.Text = 'на связи'
-    $Row.Link.Foreground = New-Brush '#37C552'
+    Show-Health $Row $data
+    # MAC-адреса для включения по сети запоминаем: выключенный кокпит их уже не сообщит
+    $macs = @($data.macs | Where-Object { $_ })
+    if ($macs.Count -gt 0 -and (@($script:Macs[$Row.Name]) -join ',') -ne ($macs -join ',')) {
+        $script:Macs[$Row.Name] = $macs
+        Save-Macs
+    }
     $Row.Ver.Text = $Row.Version
     $Row.Ver.Foreground = New-Brush $(if ($Latest -and $Row.Version -ne $Latest) { '#FFB020' } else { '#FFFFFF' })
 
@@ -588,6 +745,11 @@ $BtnRefresh.Add_Click({ Start-Refresh })
 $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
 $BtnMaintain.Add_Click({ Start-RemoteCommand 'maintain' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
+$BtnWake.Add_Click({ Start-Wake })
+$BtnStats.Add_Click({
+    $file = Join-Path $PSScriptRoot 'Stats.ps1'
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', "`"$file`"")
+})
 $BtnShutdown.Add_Click({ Start-RemoteCommand 'shutdown' })
 $BtnUnlock.Add_Click({ Start-RemoteCommand 'unlock' })
 $BtnReboot.Add_Click({ Start-RemoteCommand 'reboot' })

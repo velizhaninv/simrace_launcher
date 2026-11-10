@@ -653,6 +653,77 @@ function Get-SessionReport {
         active = [bool]$report.session; paused = [bool]$report.paused; game = [string]$report.game
         start = [string]$report.start; elapsed = [int]$elapsed
         system = $report.volSystem; gameVolume = $report.volGame; mumble = $report.volMumble
+        net = [string]$report.net; internet = $report.internet; vpn = [string]$report.vpn; base = $report.base
+    }
+}
+
+# ---------- Статистика ----------
+# Файл на незащищённом диске Z: записи переживают перезагрузку при включённой защите
+function Get-StatFile {
+    $root = $(if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\Stats' } else { Join-Path $env:ProgramData 'SIMRACE\Stats' })
+    if (-not (Test-Path -LiteralPath $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
+    return (Join-Path $root 'sessions.jsonl')
+}
+
+function Add-StatLine([string]$Line) {
+    try { Add-Content -LiteralPath (Get-StatFile) -Value $Line -Encoding UTF8 }
+    catch { Write-Log "Статистика не записана: $_" }
+}
+
+function Get-StatLines([int]$Days) {
+    $file = Get-StatFile
+    if (-not (Test-Path -LiteralPath $file)) { return @() }
+    $since = (Get-Date).Date.AddDays(-$Days)
+    $result = New-Object System.Collections.ArrayList
+    foreach ($line in [System.IO.File]::ReadAllLines($file)) {
+        if (-not $line) { continue }
+        try {
+            $item = $line | ConvertFrom-Json
+            if ([datetime]$item.start -ge $since) { [void]$result.Add($item) }
+        }
+        catch { }
+    }
+    return $result.ToArray()
+}
+
+# ---------- Включение по сети ----------
+# MAC-адреса проводных сетевых карт: по ним SIMRACE-14 будит выключенный кокпит
+$script:WakeMacs = @()
+$script:WakeMacsUntil = [datetime]::MinValue
+function Get-WakeMacs {
+    if ((Get-Date) -lt $script:WakeMacsUntil) { return $script:WakeMacs }
+    $script:WakeMacsUntil = (Get-Date).AddMinutes(10)
+    try {
+        $script:WakeMacs = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.MediaType -eq '802.3' -and $_.MacAddress } | ForEach-Object { $_.MacAddress })
+    }
+    catch { $script:WakeMacs = @() }
+    return $script:WakeMacs
+}
+
+# Windows-часть Wake-on-LAN: пробуждение сетевой карты по «магическому пакету» и выключенный быстрый запуск.
+# Пишем только при выключенной защите, иначе изменения пропадут. BIOS настраивается вручную.
+function Set-WakeOnLan {
+    $filter = Get-UwfFilter
+    if ($filter -and $filter.CurrentEnabled) { return }
+    foreach ($adapter in @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.MediaType -eq '802.3' })) {
+        try {
+            $power = Get-NetAdapterPowerManagement -Name $adapter.Name -ErrorAction Stop
+            if ([string]$power.WakeOnMagicPacket -ne 'Enabled') {
+                Set-NetAdapterPowerManagement -Name $adapter.Name -WakeOnMagicPacket Enabled -NoRestart -ErrorAction Stop
+                Write-Log "Wake-on-LAN включён в Windows: $($adapter.Name)"
+            }
+        }
+        catch { Write-Log "Wake-on-LAN не включён на $($adapter.Name): $_" }
+        $property = Get-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword '*WakeOnMagicPacket' -ErrorAction SilentlyContinue
+        if ($property -and [string]$property.RegistryValue -ne '1') {
+            try { Set-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword '*WakeOnMagicPacket' -RegistryValue 1 -NoRestart -ErrorAction Stop } catch { }
+        }
+    }
+    # Быстрый запуск мешает пробуждению из выключенного состояния
+    $powerKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power'
+    if ((Get-ItemProperty -Path $powerKey -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled -ne 0) {
+        Set-ItemProperty -Path $powerKey -Name HiberbootEnabled -Type DWord -Value 0
+        Write-Log 'Быстрый запуск Windows выключен: нужен для включения по сети'
     }
 }
 
@@ -692,7 +763,13 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
                 pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
                 maintain = $(if ($script:State -eq 'maintenance') { $script:MaintainText } else { '' })
                 session = Get-SessionReport
+                macs = @(Get-WakeMacs)
             }
+        }
+        'stats' {
+            # Записи за последние дни, не больше 31
+            $days = [math]::Max(1, [math]::Min(31, [int]$(if ($Request.days) { $Request.days } else { 31 })))
+            return @{ ok = $true; computer = $env:COMPUTERNAME; records = @(Get-StatLines $days) }
         }
         'volume' {
             if (-not (Test-AdminSource $Remote)) {
@@ -798,6 +875,14 @@ function Invoke-Request($Request) {
             return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; maintain = $script:MaintainText; volume = $script:VolumeCmd }
         }
         'overlay' { return $script:OverlayData }
+        'record' {
+            # Запись статистики от лаунчера: одна строка JSON на сеанс или игру
+            $entry = [ordered]@{ computer = $env:COMPUTERNAME; kind = [string]$Request.kind; start = [string]$Request.start; minutes = [double]$Request.minutes }
+            if ($Request.game) { $entry.game = [string]$Request.game }
+            if ($null -ne $Request.wallMinutes) { $entry.wallMinutes = [double]$Request.wallMinutes }
+            Add-StatLine ($entry | ConvertTo-Json -Compress)
+            return @{ ok = $true }
+        }
         'auth' {
             $allowed = $false
             try { $allowed = [SimraceAgentNative]::IsAdminPassword(([string]$Request.user).Trim(), [string]$Request.password) } catch { Write-Log "Ошибка проверки пароля: $_" }
@@ -861,7 +946,7 @@ function Invoke-Request($Request) {
         'open' {
             Test-Token $Request
             $name = [string]$Request.file
-            if ('UwfPanel.ps1', 'LauncherSettings.ps1', 'Fleet.ps1', 'taskmgr' -notcontains $name) { throw 'Неизвестное окно.' }
+            if ('UwfPanel.ps1', 'LauncherSettings.ps1', 'Fleet.ps1', 'Stats.ps1', 'taskmgr' -notcontains $name) { throw 'Неизвестное окно.' }
             $powershell = Join-Path $PSHOME 'powershell.exe'
             $command = if ($name -eq 'taskmgr') { "`"$(Join-Path $env:SystemRoot 'System32\Taskmgr.exe')`"" } else { "`"$powershell`" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $script:Root $name)`"" }
             $code = [SimraceAgentNative]::StartOnConsole($command, $script:Root)
@@ -894,6 +979,8 @@ try { Set-PageFileOnZ }
 catch { Write-Log "Ошибка настройки файла подкачки: $_" }
 try { Set-OverlaySize }
 catch { Write-Log "Ошибка настройки overlay: $_" }
+try { Set-WakeOnLan }
+catch { Write-Log "Ошибка настройки Wake-on-LAN: $_" }
 
 # Сетевые команды из локальной сети
 try {
