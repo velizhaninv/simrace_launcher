@@ -2559,11 +2559,11 @@ function New-WheelBadges($App) {
     $panel.HorizontalAlignment = 'Left'
     $panel.VerticalAlignment = 'Bottom'
     $panel.Margin = New-Object System.Windows.Thickness(10, 0, 0, 10)
-    # Лёгкая тень: у самих картинок светлый контур, тень отделяет их от светлых обложек
+    # Лёгкая тень: у самих картинок тонкий кант, тень отделяет их от светлых обложек
     $shadow = New-Object System.Windows.Media.Effects.DropShadowEffect
-    $shadow.BlurRadius = 8
+    $shadow.BlurRadius = 6
     $shadow.ShadowDepth = 0
-    $shadow.Opacity = 0.75
+    $shadow.Opacity = 0.6
     $shadow.Color = [System.Windows.Media.Colors]::Black
     $panel.Effect = $shadow
     foreach ($id in @($App.Wheels)) {

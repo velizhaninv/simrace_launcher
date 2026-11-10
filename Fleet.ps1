@@ -154,20 +154,24 @@ $script:QueryScript = {
       </UniformGrid>
     </StackPanel>
     <Border Background="#141518" BorderBrush="#2A2D31" BorderThickness="1" CornerRadius="14" Padding="10,6">
-      <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel x:Name="Rows"/>
-      </ScrollViewer>
+      <DockPanel>
+        <!-- Заголовки столбцов не прокручиваются вместе со списком -->
+        <ContentControl x:Name="HeaderHost" DockPanel.Dock="Top"/>
+        <ScrollViewer x:Name="RowsScroll" VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="Rows"/>
+        </ScrollViewer>
+      </DockPanel>
     </Border>
   </DockPanel>
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
-# Галочка, кокпит, связь, версия, защита, overlay, файл подкачки, игра и сеанс, сейчас, громкость
-$script:Widths = @(40, 130, 100, 130, 110, 130, 140, 250, 0, 60)
+# Галочка, кокпит, связь, версия, защита, overlay, файл подкачки, сеанс, сейчас, громкость
+$script:Widths = @(40, 130, 100, 130, 110, 130, 140, 190, 0, 60)
 function New-Brush([string]$Color) { return (New-Object System.Windows.Media.BrushConverter).ConvertFromString($Color) }
 
 function New-Cell([System.Windows.Controls.Grid]$Grid, [int]$Column, [string]$Text, [string]$Color = '#FFFFFF', [bool]$Bold = $false) {
@@ -197,12 +201,17 @@ function New-RowGrid {
 $header = New-RowGrid
 $header.Margin = New-Object System.Windows.Thickness(0, 6, 0, 8)
 $column = 1
-foreach ($title in 'КОКПИТ', 'СВЯЗЬ', 'ВЕРСИЯ', 'ЗАЩИТА', 'OVERLAY', 'ФАЙЛ ПОДКАЧКИ', 'ИГРА · СЕАНС', 'СЕЙЧАС', 'ЗВУК') {
+foreach ($title in 'КОКПИТ', 'СВЯЗЬ', 'ВЕРСИЯ', 'ЗАЩИТА', 'OVERLAY', 'ФАЙЛ ПОДКАЧКИ', 'СЕАНС', 'СЕЙЧАС', 'ЗВУК') {
     $cell = New-Cell $header $column $title '#7C8085' $true
     $cell.FontSize = 12
     $column++
 }
-[void]$Rows.Children.Add($header)
+$HeaderHost.Content = $header
+# Когда у списка появляется полоса прокрутки, сдвигаем заголовки на её ширину, чтобы столбцы совпадали
+$RowsScroll.Add_ScrollChanged({
+    $right = $(if ($RowsScroll.ComputedVerticalScrollBarVisibility -eq 'Visible') { [System.Windows.SystemParameters]::VerticalScrollBarWidth } else { 0 })
+    $header.Margin = New-Object System.Windows.Thickness(0, 6, $right, 8)
+})
 
 # Строки создаются один раз, чтобы выбор не сбрасывался при обновлении списка
 $script:RowMap = @{}
@@ -236,7 +245,14 @@ foreach ($name in $script:Names) {
     $volumeButton.Content = [System.Windows.Markup.XamlReader]::Parse('<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="22" Height="22"><Path Data="M3,9 H7 L12,5 V17 L7,13 H3 Z" Fill="#C9CCD0"/><Path Data="M15,8 Q17.5,11 15,14 M17.5,5.5 Q21.5,11 17.5,16.5" Stroke="#C9CCD0" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas>')
     $volumeButton.Tag = $name
     $volumeButton.IsEnabled = $false
-    $volumeButton.Add_Click({ param($sender) Show-VolumePopup $script:RowMap[[string]$sender.Tag] $sender })
+    $volumeButton.Add_Click({
+        param($sender)
+        try { Show-VolumePopup $script:RowMap[[string]$sender.Tag] $sender }
+        catch {
+            $TxtStatus.Text = "Окно громкости не открылось: $($_.Exception.Message)"
+            try { Add-Content -LiteralPath $script:FleetLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') Громкость: $($_ | Out-String)" -Encoding UTF8 } catch { }
+        }
+    })
     [System.Windows.Controls.Grid]::SetColumn($volumeButton, 9)
     [void]$grid.Children.Add($volumeButton)
     $row | Add-Member -NotePropertyName VolumeButton -NotePropertyValue $volumeButton
@@ -300,29 +316,20 @@ function Show-Result($Row, $Answer, [string]$Latest) {
         $Row.Page.Foreground = New-Brush $(if (@($pages | Where-Object { $_.Name -like 'Z:*' }).Count -gt 0) { '#37C552' } else { '#FFB020' })
     }
 
-    # Игра и сеанс по отчёту лаунчера
+    # Сеанс по отчёту лаунчера: начало и длительность. Без сеанса прочерк.
     $session = $data.session
     $Row.Volumes = $session
     $Row.VolumeButton.IsEnabled = [bool]$session
     if ($session -and $session.active) {
         $span = [TimeSpan]::FromSeconds([int]$session.elapsed)
-        $parts = @()
-        if ($session.game) { $parts += [string]$session.game }
-        $parts += "с $($session.start)"
-        $parts += ('{0}:{1:00}' -f [int][Math]::Floor($span.TotalHours), $span.Minutes)
-        if ($session.paused) { $parts += 'пауза' }
-        $Row.Session.Text = $parts -join ' · '
+        $Row.Session.Text = "с $($session.start) · " + ('{0}:{1:00}' -f [int][Math]::Floor($span.TotalHours), $span.Minutes) + $(if ($session.paused) { ' · пауза' } else { '' })
         $Row.Session.Foreground = New-Brush $(if ($session.paused) { '#FFB020' } else { '#FFFFFF' })
     }
-    elseif ($session -and $session.game) {
-        $Row.Session.Text = [string]$session.game
-        $Row.Session.Foreground = New-Brush '#B4B8BC'
-    }
     else {
-        $Row.Session.Text = $(if ($session) { 'нет сеанса' } else { '—' })
+        $Row.Session.Text = '—'
         $Row.Session.Foreground = New-Brush '#7C8085'
     }
-    $Row.Session.ToolTip = $Row.Session.Text
+    $game = $(if ($session -and $session.game) { [string]$session.game } else { '' })
 
     $Row.Busy = [bool]$data.busy
     $Row.State = [string]$data.state
@@ -338,9 +345,10 @@ function Show-Result($Row, $Answer, [string]$Latest) {
         'shutdown' { 'выключается' }
         'maintenance' { $(if ($data.maintain) { "обновление игр: $($data.maintain)" } else { 'обновление игр' }) }
         'await-decision' { 'ждёт ответа на экране' }
-        default { $(if ($data.busy) { [string]$data.busy } else { 'свободен' }) }
+        # Без команд в работе: запущенная игра, иначе сеанс или «свободен»
+        default { $(if ($game) { "игра: $game" } elseif ($data.busy) { [string]$data.busy } else { 'свободен' }) }
     }
-    $color = $(if ($data.state -and $data.state -ne 'idle') { '#FFB020' } elseif ($data.busy) { '#B4B8BC' } else { '#37C552' })
+    $color = $(if ($data.state -and $data.state -ne 'idle') { '#FFB020' } elseif ($game) { '#FFFFFF' } elseif ($data.busy) { '#B4B8BC' } else { '#37C552' })
     if ($data.message -and $data.updateOk -eq $false) {
         $text = [string]$data.message
         $color = '#FF6A55'
@@ -596,5 +604,12 @@ $timer.Add_Tick({
     catch { $TxtStatus.Text = "Ошибка: $_" }
 })
 $timer.Start()
+$script:FleetLog = $(if (Test-Path -LiteralPath 'Z:\SIMRACE\Logs') { "Z:\SIMRACE\Logs\$env:COMPUTERNAME-fleet.log" } else { Join-Path $env:TEMP 'simrace-fleet.log' })
+$Window.Dispatcher.Add_UnhandledException({
+    param($sender, $e)
+    $e.Handled = $true
+    $TxtStatus.Text = "Ошибка: $($e.Exception.Message)"
+    try { Add-Content -LiteralPath $script:FleetLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $($e.Exception)" -Encoding UTF8 } catch { }
+})
 [void]$Window.ShowDialog()
 $timer.Stop()
