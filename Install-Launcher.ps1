@@ -208,7 +208,7 @@ if ($Uninstall) {
 
 # Копируем файлы
 New-Item -ItemType Directory -Path (Join-Path $target 'images') -Force | Out-Null
-foreach ($file in 'SimraceLauncher.ps1', 'LauncherSettings.ps1', 'Settings-Launcher.cmd', 'Start-Launcher.cmd', 'Fleet.ps1', 'Fleet.cmd', 'Stats.ps1', 'Stats.cmd', 'WebPanel.ps1', 'WebPanel.html', 'AC-Settings.ps1', 'UwfPanel.ps1', 'SimraceAgent.ps1', 'Update-Apply.ps1', 'version.txt', 'apps.json', 'facts.txt', 'logo.png', 'background.jpg', 'dash.png', 'dash-off.png', 'qr-telegram.png', 'qr-site.png', 'wheel-nardi.png', 'wheel-cs.png', 'wheel-ks.png') {
+foreach ($file in 'SimraceLauncher.ps1', 'LauncherSettings.ps1', 'Settings-Launcher.cmd', 'Start-Launcher.cmd', 'Fleet.ps1', 'Fleet.cmd', 'Stats.ps1', 'Stats.cmd', 'WebPanel.ps1', 'WebPanel.html', 'UwfPanel.ps1', 'SimraceAgent.ps1', 'Update-Apply.ps1', 'version.txt', 'apps.json', 'facts.txt', 'logo.png', 'background.jpg', 'dash.png', 'dash-off.png', 'qr-telegram.png', 'qr-site.png', 'wheel-nardi.png', 'wheel-cs.png', 'wheel-ks.png') {
     $source = Join-Path $PSScriptRoot $file
     # При обновлении настройки сохраняются: игры, логины и кнопки под плитками
     if ($file -eq 'apps.json' -and -not $ResetConfig -and (Test-Path -LiteralPath (Join-Path $target 'apps.json'))) {
