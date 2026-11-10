@@ -28,7 +28,12 @@ $script:LauncherSeen = [datetime]::MinValue
 $script:IdleNext = [datetime]::MinValue
 $script:ForceUpdate = $false
 $script:WaitAction = 'update'
-$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка' }
+$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка'; maintain = 'Обслуживание' }
+$script:MaintainStart = [datetime]::MinValue
+$script:MaintainNext = [datetime]::MinValue
+$script:MaintainQuiet = 0
+$script:MaintainBytes = -1
+$script:MaintainText = ''
 $script:AdminComputer = 'SIMRACE-14'
 $script:AdminIps = @()
 $script:AdminIpsUntil = [datetime]::MinValue
@@ -317,6 +322,7 @@ function Update-AgentState {
     Update-OverlayCache
     Update-Network
     Update-WaitingUpdate
+    Update-Maintenance
     if ($script:State -ne 'updating' -or -not $script:UpdateProcess -or -not $script:UpdateProcess.HasExited) { return }
     $code = $script:UpdateProcess.ExitCode
     $script:UpdateProcess = $null
@@ -402,6 +408,26 @@ function Update-WaitingUpdate {
         Restart-Pc
         return
     }
+    if ($script:WaitAction -eq 'maintain') {
+        $filter = Get-UwfFilter
+        if (-not $filter -or -not $filter.CurrentEnabled) {
+            Start-Maintenance
+            return
+        }
+        Set-Pending 'maintain'
+        try { Set-Uwf $false }
+        catch {
+            Set-Pending ''
+            $script:State = 'idle'
+            $script:UpdateOk = $false
+            $script:Message = "Обслуживание не начато: $($_.Exception.Message)"
+            Write-Log $script:Message
+            return
+        }
+        $script:State = 'rebooting'
+        Restart-Pc
+        return
+    }
     if ($script:WaitAction -eq 'unlock') {
         try {
             $filter = Get-UwfFilter
@@ -466,8 +492,120 @@ function Update-WaitingUpdate {
     Start-Update
 }
 
+# ---------- Обслуживание: обновление игр в Steam ----------
+# Кокпит разблокирован, лаунчер запускает Steam, служба следит за загрузками.
+# Когда загрузки стихли, защита включается обратно и кокпит перезагружается.
+
+$script:MaintainMinMinutes = 6       # Steam нужно время, чтобы запуститься и проверить обновления
+$script:MaintainMaxMinutes = 120     # дольше кокпит без защиты не оставляем
+$script:MaintainQuietChecks = 4      # столько проверок подряд (по 30 секунд) без загрузок: всё скачано
+
+# Папки steamapps всех библиотек Steam
+function Get-SteamAppsFolders {
+    $roots = @()
+    foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam') {
+        $value = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        if ($value -and $value.InstallPath) { $roots += $value.InstallPath }
+    }
+    $libraries = @()
+    foreach ($root in $roots) {
+        $libraries += $root
+        $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
+        if (Test-Path -LiteralPath $vdf) {
+            foreach ($match in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw -Encoding UTF8), '"path"\s+"([^"]+)"')) { $libraries += ($match.Groups[1].Value -replace '\\\\', '\') }
+        }
+    }
+    return @($libraries | Sort-Object -Unique | ForEach-Object { Join-Path $_ 'steamapps' } | Where-Object { Test-Path -LiteralPath $_ })
+}
+
+# Сколько игр ждут обновления и сколько байт уже скачано по ним. Растущее число байт: загрузка идёт.
+function Get-SteamDownloads {
+    $pending = 0
+    $remaining = [long]0
+    $downloaded = [long]0
+    $recent = $false
+    foreach ($folder in Get-SteamAppsFolders) {
+        foreach ($manifest in @(Get-ChildItem -LiteralPath $folder -Filter 'appmanifest_*.acf' -File -ErrorAction SilentlyContinue)) {
+            $text = Get-Content -LiteralPath $manifest.FullName -Raw -ErrorAction SilentlyContinue
+            $flags = [regex]::Match([string]$text, '"StateFlags"\s+"(\d+)"')
+            # 4: игра установлена и обновлена. Остальное: нужно обновление или идёт загрузка.
+            if (-not $flags.Success -or $flags.Groups[1].Value -eq '4') { continue }
+            $pending++
+            $need = [regex]::Match([string]$text, '"BytesToDownload"\s+"(\d+)"')
+            $have = [regex]::Match([string]$text, '"BytesDownloaded"\s+"(\d+)"')
+            if ($need.Success -and $have.Success) {
+                $remaining += [math]::Max([long]0, [long]$need.Groups[1].Value - [long]$have.Groups[1].Value)
+                $downloaded += [long]$have.Groups[1].Value
+            }
+            if ($manifest.LastWriteTime -gt (Get-Date).AddMinutes(-2)) { $recent = $true }
+        }
+        # Папка загрузки меняется, пока Steam качает или распаковывает
+        $work = Join-Path $folder 'downloading'
+        $item = Get-Item -LiteralPath $work -ErrorAction SilentlyContinue
+        if ($item -and $item.LastWriteTime -gt (Get-Date).AddMinutes(-2)) { $recent = $true }
+        foreach ($sub in @(Get-ChildItem -LiteralPath $work -Directory -ErrorAction SilentlyContinue)) {
+            if ($sub.LastWriteTime -gt (Get-Date).AddMinutes(-2)) { $recent = $true }
+        }
+    }
+    return @{ Pending = $pending; RemainingMb = [math]::Round($remaining / 1MB); Downloaded = $downloaded; Recent = $recent }
+}
+
+function Start-Maintenance {
+    Set-Pending 'maintain'       # после случайной перезагрузки обслуживание продолжится
+    $script:State = 'maintenance'
+    $script:MaintainStart = Get-Date
+    $script:MaintainNext = (Get-Date).AddSeconds(30)
+    $script:MaintainQuiet = 0
+    $script:MaintainBytes = -1
+    $script:MaintainText = 'запуск Steam'
+    $script:Message = ''
+    $script:UpdateOk = $true
+    Write-Log 'Обслуживание: защита выключена, жду загрузок Steam'
+}
+
+# Конец обслуживания: защиту обратно и перезагрузка
+function Stop-Maintenance([string]$Reason) {
+    Write-Log "Обслуживание закончено: $Reason"
+    Set-Pending ''
+    try {
+        Set-Uwf $true
+        $script:State = 'rebooting'
+        Restart-Pc
+    }
+    catch {
+        $script:State = 'idle'
+        $script:UpdateOk = $false
+        $script:Message = "После обслуживания защита не включилась: $($_.Exception.Message)"
+        Write-Log $script:Message
+    }
+}
+
+function Update-Maintenance {
+    if ($script:State -ne 'maintenance' -or (Get-Date) -lt $script:MaintainNext) { return }
+    $script:MaintainNext = (Get-Date).AddSeconds(30)
+    $minutes = ((Get-Date) - $script:MaintainStart).TotalMinutes
+    $info = $null
+    try { $info = Get-SteamDownloads } catch { Write-Log "Обслуживание: загрузки Steam не прочитаны: $_" }
+    $active = $false
+    if ($info) {
+        $active = $info.Recent -or ($script:MaintainBytes -ge 0 -and $info.Downloaded -ne $script:MaintainBytes)
+        $script:MaintainBytes = $info.Downloaded
+        $script:MaintainText = $(if ($active) {
+            $(if ($info.RemainingMb -gt 0) { "загрузка: игр $($info.Pending), осталось $([math]::Round($info.RemainingMb / 1024, 1)) ГБ" } else { "загрузка: игр $($info.Pending)" })
+        } elseif ($info.Pending -gt 0) { "ждёт Steam: игр без обновления $($info.Pending)" } else { 'все игры обновлены' })
+    }
+    $script:MaintainQuiet = $(if ($active) { 0 } else { $script:MaintainQuiet + 1 })
+    if ($minutes -ge $script:MaintainMaxMinutes) {
+        Stop-Maintenance "прошло $($script:MaintainMaxMinutes) минут, $($script:MaintainText)"
+        return
+    }
+    if ($minutes -ge $script:MaintainMinMinutes -and $script:MaintainQuiet -ge $script:MaintainQuietChecks) {
+        Stop-Maintenance "загрузки закончились ($($script:MaintainText))"
+    }
+}
+
 # Подключения из локальной сети: состояние и обновление от любого компьютера клуба, без пароля.
-# Обновление ставит официальную версию с GitHub. Блокировка, разблокировка и перезагрузка принимаются только с SIMRACE-14.
+# Обновление ставит официальную версию с GitHub. Блокировка, разблокировка, перезагрузка и обслуживание принимаются только с SIMRACE-14.
 # Все три команды ждут, пока на кокпите закончится сеанс, если администратор не попросил не ждать.
 function Update-Network {
     if (-not $script:Listener) { return }
@@ -529,15 +667,26 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
                 uwfNow = [bool]($filter -and $filter.CurrentEnabled); uwfNext = [bool]($filter -and $filter.NextEnabled)
                 usedMb = $data.usedMb; freeMb = $data.freeMb; pages = @($data.pages); busy = Get-BusyReason
                 pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
+                maintain = $(if ($script:State -eq 'maintenance') { $script:MaintainText } else { '' })
             }
         }
-        { $_ -eq 'lock' -or $_ -eq 'unlock' -or $_ -eq 'reboot' } {
+        { $_ -eq 'lock' -or $_ -eq 'unlock' -or $_ -eq 'reboot' -or $_ -eq 'maintain' } {
             $action = [string]$Request.action
             if (-not (Test-AdminSource $Remote)) {
                 Write-Log "Отказано: команда «$action» пришла с $Remote, а не с $($script:AdminComputer)"
                 return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
             }
             if ($action -ne 'reboot' -and -not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере нет.' } }
+            # Во время обслуживания: «Заблокировать» заканчивает его сразу, «Перезагрузить» перезагружает без защиты
+            if ($script:State -eq 'maintenance') {
+                if ($action -eq 'lock') {
+                    Stop-Maintenance "администратор заблокировал с $Remote"
+                    return @{ ok = $true; state = $script:State }
+                }
+                if ($action -eq 'maintain') { return @{ ok = $true; state = $script:State } }
+                if ($action -ne 'reboot') { return @{ ok = $false; error = 'Идёт обслуживание. Заблокируй кокпит, чтобы его закончить.' } }
+                $script:State = 'idle'
+            }
             if ($script:State -eq 'idle') {
                 $script:State = 'waiting-idle'
                 $script:WaitAction = $action
@@ -604,7 +753,7 @@ function Invoke-Request($Request) {
                 $script:LauncherSeen = Get-Date
             }
             $filter = Get-UwfFilter
-            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion }
+            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; maintain = $script:MaintainText }
         }
         'overlay' { return $script:OverlayData }
         'auth' {
@@ -717,6 +866,17 @@ catch {
 # Продолжаем обновление, начатое до перезагрузки
 try {
     $pending = Get-Pending
+    if ($pending -eq 'maintain') {
+        $filter = Get-UwfFilter
+        if ($filter -and $filter.CurrentEnabled) {
+            # Защита не выключилась: обслуживание не начинаем
+            Set-Pending ''
+            $script:UpdateOk = $false
+            $script:Message = 'Обслуживание не начато: защита UWF не выключилась.'
+            Write-Log $script:Message
+        }
+        else { Start-Maintenance }
+    }
     if ($pending -eq 'remote-relock') {
         Set-Pending ''
         $filter = Get-UwfFilter

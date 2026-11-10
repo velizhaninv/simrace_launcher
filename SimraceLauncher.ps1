@@ -1480,6 +1480,10 @@ function Test-SteamPickerClosed($Session) {
 }
 
 function Start-App($App, [bool]$ChooseAccount = $false) {
+    if ($script:Maintenance) {
+        Show-Overlay 'Кокпит на обслуживании' 'Сейчас обновляются игры. Когда загрузка закончится, компьютер перезагрузится сам.' 'Понятно'
+        return
+    }
     $script:CancelledLaunch = $null
     $Account = $App.Account
     $script:GameWindow = [IntPtr]::Zero
@@ -3386,6 +3390,47 @@ function Open-TaskManager {
     catch { Write-Log "Диспетчер задач не запущен: $_" }
 }
 
+# Steam из панели администратора: открывается под гостем, окно выводится поверх лаунчера
+function Open-SteamWindow {
+    if (-not $script:SteamExe -or -not (Test-Path -LiteralPath $script:SteamExe)) {
+        Show-AdminNote 'Steam на этом компьютере не найден.'
+        return
+    }
+    try {
+        Start-Process -FilePath $script:SteamExe -ArgumentList 'steam://open/main'
+        $script:BringTitle = 'Steam'
+        $script:BringUntil = (Get-Date).AddSeconds(20)
+        Write-Log 'Steam открыт из панели администратора'
+    }
+    catch { Show-AdminNote "Steam не открылся: $($_.Exception.Message)" }
+}
+
+# ---------- Обслуживание ----------
+# Служба выключила защиту для обновления игр. Лаунчер держит Steam запущенным и не даёт начать игру.
+function Update-MaintenanceMode {
+    $status = Get-AgentShared 'Status'
+    $on = [bool]($status -and $status.state -eq 'maintenance')
+    if ($on -ne $script:Maintenance) {
+        $script:Maintenance = $on
+        $MaintBanner.Visibility = $(if ($on) { 'Visible' } else { 'Collapsed' })
+        Write-Log $(if ($on) { 'Обслуживание: обновление игр, запуск игр закрыт' } else { 'Обслуживание закончено' })
+        $script:MaintainSteamNext = [datetime]::MinValue
+    }
+    if (-not $on) { return }
+    $TxtMaint.Text = $(if ($status.maintain) { "Обновление игр · $($status.maintain)" } else { 'Обновление игр' })
+    # Steam должен работать, иначе игры не обновятся. Запускаем свёрнутым в трей, вход по сохранённому аккаунту.
+    if ($script:SteamExe -and (Get-Date) -ge $script:MaintainSteamNext) {
+        $script:MaintainSteamNext = (Get-Date).AddMinutes(1)
+        if (-not (Get-Process -Name steam -ErrorAction SilentlyContinue)) {
+            try {
+                Start-Process -FilePath $script:SteamExe -ArgumentList '-silent'
+                Write-Log 'Обслуживание: Steam запущен'
+            }
+            catch { Write-Log "Обслуживание: Steam не запустился: $_" }
+        }
+    }
+}
+
 # Настройки сохранены и администратор попросил перезапуск. Во время игры ждём её окончания.
 function Test-RestartRequest {
     if ($script:Session) { return }
@@ -4070,6 +4115,15 @@ function Submit-Decision([bool]$Lock) {
   <Grid>
     <Image x:Name="BackgroundImage" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
+    <!-- Обслуживание: под номером кокпита, пока служба обновляет игры -->
+    <Border x:Name="MaintBanner" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,52,0,0"
+            Background="#EB141518" BorderBrush="#E2450F" BorderThickness="1" CornerRadius="12" Padding="18,8">
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="ОБСЛУЖИВАНИЕ" FontSize="14" FontWeight="SemiBold" Foreground="#E2450F" VerticalAlignment="Center"/>
+        <TextBlock x:Name="TxtMaint" FontSize="15" Foreground="White" VerticalAlignment="Center" Margin="12,0,0,0"/>
+      </StackPanel>
+    </Border>
+
     <!-- Версия лаунчера: мелко в левом нижнем углу -->
     <TextBlock x:Name="TxtVersion" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="18,0,0,10" FontSize="12" Foreground="#6C6F73" IsHitTestVisible="False"/>
 
@@ -4546,10 +4600,11 @@ function Submit-Decision([bool]$Lock) {
             <Button x:Name="BtnAdminFleet" Style="{StaticResource AdminTile}" Margin="0,10,0,0" Visibility="Collapsed"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="2" Canvas.Top="4" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="14" Canvas.Top="4" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="2" Canvas.Top="14" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="White" StrokeThickness="2"/><Rectangle Canvas.Left="14" Canvas.Top="14" Width="8" Height="7" RadiusX="1.5" RadiusY="1.5" Stroke="#E2450F" StrokeThickness="2"/></Canvas><TextBlock Text="Кокпиты клуба: состояние и обновление" VerticalAlignment="Center" Margin="12,0,0,0"/></StackPanel></Button>
 
             <TextBlock Text="КОМПЬЮТЕР" Style="{StaticResource AdminGroup}"/>
-            <UniformGrid Columns="3" Margin="-5,0">
-              <Button x:Name="BtnAdminTaskMgr" Style="{StaticResource AdminTile}" Padding="14,8"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Rectangle Canvas.Left="3" Canvas.Top="4" Width="18" Height="16" RadiusX="3" RadiusY="3" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6,13 H9 L11,9 L13,16 L15,13 H18" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Диспетчер задач" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="16" TextTrimming="CharacterEllipsis"/></StackPanel></Button>
-              <Button x:Name="BtnAdminShutdown" Style="{StaticResource AdminTile}" Padding="14,8"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M12,3 V11" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6.8,6.8 A8,8 0 1 0 17.2,6.8" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Выключить ПК" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="16" TextTrimming="CharacterEllipsis"/></StackPanel></Button>
-              <Button x:Name="BtnAdminReboot" Style="{StaticResource AdminTile}" Padding="14,8"><StackPanel Orientation="Horizontal"><Canvas Width="24" Height="24" VerticalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезагрузить ПК" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="16" TextTrimming="CharacterEllipsis"/></StackPanel></Button>
+            <UniformGrid Columns="4" Margin="-5,0">
+              <Button x:Name="BtnAdminTaskMgr" Style="{StaticResource AdminIconTile}"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Rectangle Canvas.Left="3" Canvas.Top="4" Width="18" Height="16" RadiusX="3" RadiusY="3" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6,13 H9 L11,9 L13,16 L15,13 H18" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Диспетчер задач" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnAdminSteam" Style="{StaticResource AdminIconTile}" ToolTip="Открыть Steam"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M7,8 H17 A5,5 0 0 1 17,18 H7 A5,5 0 0 1 7,8 Z" Stroke="White" StrokeThickness="2" StrokeLineJoin="Round"/><Path Data="M7,11 V15 M5,13 H9" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/><Ellipse Canvas.Left="15.2" Canvas.Top="10.2" Width="2.6" Height="2.6" Fill="#E2450F"/><Ellipse Canvas.Left="17.2" Canvas.Top="13.2" Width="2.6" Height="2.6" Fill="White"/></Canvas><TextBlock Text="Steam" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnAdminShutdown" Style="{StaticResource AdminIconTile}"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M12,3 V11" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M6.8,6.8 A8,8 0 1 0 17.2,6.8" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Выключить ПК" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
+              <Button x:Name="BtnAdminReboot" Style="{StaticResource AdminIconTile}"><StackPanel><Canvas Width="24" Height="24" HorizontalAlignment="Center"><Path Data="M19.5,12 A7.5,7.5 0 1 1 17.3,6.7" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/><Path Data="M17.6,2.6 V7 H13.2" Stroke="#E2450F" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas><TextBlock Text="Перезагрузить ПК" Style="{StaticResource AdminIconLabel}"/></StackPanel></Button>
             </UniformGrid>
 
             <DockPanel Margin="0,20,0,0">
@@ -4769,6 +4824,8 @@ try {
     $script:Tiles = New-Object System.Collections.ArrayList
     $script:LauncherVersion = $(try { (Get-Content -LiteralPath (Join-Path $script:Root 'version.txt') -TotalCount 1 -ErrorAction Stop).Trim() } catch { '' })
     $script:UpdateAvailable = $false
+    $script:Maintenance = $false
+    $script:MaintainSteamNext = [datetime]::MinValue
     $script:UpdateLatest = ''
     $script:UpdateToastShown = $false
     $script:UpdateToastUntil = [datetime]::MinValue
@@ -4776,13 +4833,13 @@ try {
     $script:GearButton = $null
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-    foreach ($name in 'BackgroundImage', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
+    foreach ($name in 'BackgroundImage', 'MaintBanner', 'TxtMaint', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
                       'TxtAdminError', 'BtnExit', 'BtnCancel', 'TxtAdminTitle', 'BtnMinimizeLauncher', 'TxtUwfState', 'AdminLogin', 'AdminMenu', 'AdminConfirm', 'BtnAdminLogin', 'BtnAdminUpdate', 'BtnAdminUwf', 'BtnAdminSettings', 'BtnAdminUwfPanel', 'BtnAdminReboot', 'TxtAdminNote', 'BtnAdminClose', 'TxtConfirmTitle', 'TxtConfirmText', 'BtnConfirmOk', 'BtnConfirmCancel', 'DecisionPanel', 'TxtDecisionText', 'BtnDecideLock', 'BtnDecideKeep',
                       'DashOffImage', 'DashLive', 'SheenHost', 'TxtDashTimer', 'TxtDashStart', 'TxtDashState', 'TxtDashText', 'TxtDashPosition', 'TxtDashLap', 'SessionStrip', 'TxtStripTime', 'TxtStripStart', 'BtnPause', 'BtnEndSession',
-                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'TxtNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'BtnAdminFleet', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'SystemMenu', 'LampSysUwf', 'TxtSysUwf', 'BarSysOverlay', 'TxtSysOverlay', 'LampSysPage', 'TxtSysPage', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
+                      'SessionStart', 'BtnStartSession', 'TxtLastSession', 'StatusStrip', 'BtnStatusLang', 'NetBox', 'IconNet', 'TxtNet', 'StatusLinks', 'LampUwf', 'AxesCard', 'BarWheel', 'BarThrottle', 'BarBrake', 'BarClutch', 'TxtAxesRaw', 'SessionFields', 'BtnAdminShutdown', 'OverlayStrip', 'BarOverlay', 'TxtOverlayFree', 'BtnRestartLauncher', 'BtnAdminTaskMgr', 'BtnAdminSteam', 'BtnAdminFleet', 'IconPause', 'LockBox', 'IconLock', 'LampLock', 'LampCaps', 'TxtAdminUwf', 'IconAdminUwf', 'ImgRunning', 'SystemMenu', 'LampSysUwf', 'TxtSysUwf', 'BarSysOverlay', 'TxtSysOverlay', 'LampSysPage', 'TxtSysPage', 'InfoPanel', 'TxtInfoTitle', 'TxtInfoText', 'BtnInfoOk', 'NoticePanel', 'TxtNoticeGame', 'TxtNoticeText', 'BtnNoticeOk', 'BtnLayout', 'GameBar', 'SelectedInfo', 'TxtGameRunning', 'BtnResumeGame', 'BtnQuitGame') {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
@@ -4943,6 +5000,7 @@ try {
     $BtnAdminLogin.Add_Click({ Submit-AdminLogin })
     $BtnRestartLauncher.Add_Click({ Close-Launcher 2 })
     $BtnAdminTaskMgr.Add_Click({ Open-TaskManager })
+    $BtnAdminSteam.Add_Click({ Open-SteamWindow })
     $BtnAdminFleet.Add_Click({ Open-AdminWindow 'Fleet.ps1' 'Кокпиты SIMRACE' })
     # Управление кокпитами клуба есть только на администраторском компьютере SIMRACE-14
     if ($env:COMPUTERNAME -match '(?i)-14$') { $BtnAdminFleet.Visibility = 'Visible' }
@@ -5065,6 +5123,7 @@ try {
             if ($script:TickCount % 20 -eq 1) { Update-OverlayGauge }
             if ($script:TickCount % 4 -eq 2) { Test-RestartRequest }
             if ($script:TickCount % 4 -eq 3) { Update-UpdateNotice }
+            if ($script:TickCount % 4 -eq 1) { Update-MaintenanceMode }
             # Для обновления по сети: служба дождётся конца сеанса
             if ($script:AgentShared) { $script:AgentShared.Busy = [bool]($script:Config.requireSession -ne $false -and $script:TimerState -ne 'idle') }
             if ($script:TickCount % 6 -eq 0) {

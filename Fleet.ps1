@@ -64,17 +64,19 @@ $script:QueryScript = {
         Title="Кокпиты SIMRACE" Width="1320" Height="860" MinWidth="1100" MinHeight="600" WindowStartupLocation="CenterScreen"
         Background="#0E0F11" Foreground="White" FontFamily="Segoe UI" FontSize="16">
   <Window.Resources>
+    <!-- Команды внизу: одинаковые по размеру -->
     <Style x:Key="Btn" TargetType="Button">
       <Setter Property="Foreground" Value="White"/>
-      <Setter Property="FontSize" Value="16"/>
+      <Setter Property="FontSize" Value="15"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="0,0,10,0"/>
+      <Setter Property="Height" Value="46"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#1C1E21" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="10" Padding="20,10">
-              <ContentPresenter HorizontalAlignment="Center"/>
+            <Border x:Name="Box" Background="#1C1E21" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="10" Padding="14,0">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="#E2450F"/></Trigger>
@@ -88,11 +90,35 @@ $script:QueryScript = {
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#D23F0D" CornerRadius="10" Padding="22,10">
-              <ContentPresenter HorizontalAlignment="Center"/>
+            <Border x:Name="Box" Background="#D23F0D" CornerRadius="10" Padding="14,0">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="#E8501B"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- Разблокировка снимает защиту: текст красноватый, чтобы не нажать по ошибке -->
+    <Style x:Key="Danger" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Foreground" Value="#FF6A55"/>
+    </Style>
+    <!-- Выбор над списком: лёгкие текстовые кнопки -->
+    <Style x:Key="Link" TargetType="Button">
+      <Setter Property="Foreground" Value="#C9CCD0"/>
+      <Setter Property="FontSize" Value="15"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="0,0,4,0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Box" Background="Transparent" CornerRadius="8" Padding="12,6">
+              <ContentPresenter VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="#1C1E21"/><Setter Property="Foreground" Value="White"/></Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -105,23 +131,26 @@ $script:QueryScript = {
       <TextBlock x:Name="TxtLatest" DockPanel.Dock="Right" FontSize="16" Foreground="#A2A6AB" VerticalAlignment="Center"/>
       <TextBlock Text="Кокпиты SIMRACE" FontSize="30" FontWeight="SemiBold"/>
     </DockPanel>
+    <!-- Над списком: выбор кокпитов и обновление списка -->
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+      <Button x:Name="BtnRefresh" DockPanel.Dock="Right" Content="↻  Обновить список" Style="{StaticResource Link}" Margin="0"/>
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock Text="Выбрать:" Foreground="#7C8085" FontSize="15" VerticalAlignment="Center" Margin="2,0,6,0"/>
+        <Button x:Name="BtnSelectAll" Content="все на связи" Style="{StaticResource Link}"/>
+        <Button x:Name="BtnSelectOld" Content="устаревшие" Style="{StaticResource Link}"/>
+        <Button x:Name="BtnSelectNone" Content="снять выбор" Style="{StaticResource Link}"/>
+      </StackPanel>
+    </DockPanel>
+    <!-- Внизу: статус и команды для отмеченных кокпитов, все кнопки одного размера -->
     <StackPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
       <TextBlock x:Name="TxtStatus" Foreground="#A2A6AB" TextWrapping="Wrap" Margin="2,0,0,12"/>
-      <DockPanel>
-        <!-- Выбор кокпитов справа, команды слева -->
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-          <Button x:Name="BtnSelectOld" Content="Устаревшие" Style="{StaticResource Btn}"/>
-          <Button x:Name="BtnSelectAll" Content="Все" Style="{StaticResource Btn}"/>
-          <Button x:Name="BtnSelectNone" Content="Снять выбор" Style="{StaticResource Btn}"/>
-          <Button x:Name="BtnRefresh" Content="Обновить список" Style="{StaticResource Btn}" Margin="0"/>
-        </StackPanel>
-        <StackPanel Orientation="Horizontal">
-          <Button x:Name="BtnUpdate" Content="Обновить лаунчер" Style="{StaticResource Primary}"/>
-          <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
-          <Button x:Name="BtnUnlock" Content="Разблокировать" Style="{StaticResource Btn}"/>
-          <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
-        </StackPanel>
-      </DockPanel>
+      <UniformGrid Rows="1" Margin="0,0,-10,0">
+        <Button x:Name="BtnUpdate" Content="Обновить лаунчер" Style="{StaticResource Primary}"/>
+        <Button x:Name="BtnMaintain" Content="Обновить игры" Style="{StaticResource Btn}" ToolTip="Обслуживание: защита выключается, Steam докачивает обновления, защита включается обратно"/>
+        <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
+        <Button x:Name="BtnUnlock" Content="Разблокировать" Style="{StaticResource Danger}"/>
+        <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
+      </UniformGrid>
     </StackPanel>
     <Border Background="#141518" BorderBrush="#2A2D31" BorderThickness="1" CornerRadius="14" Padding="10,6">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -132,7 +161,7 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
@@ -259,11 +288,12 @@ function Show-Result($Row, $Answer, [string]$Latest) {
     $Row.BusyText = [string]$data.busy
     $text = switch ([string]$data.state) {
         'waiting-idle' {
-            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } default { 'обновится' } })
+            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } 'maintain' { 'начнёт обновление игр' } default { 'обновится' } })
             $(if ($data.busy) { "$verb после сеанса ($($data.busy))" } else { "$verb через несколько секунд" })
         }
         'updating' { 'обновляется' }
         'rebooting' { 'перезагружается' }
+        'maintenance' { $(if ($data.maintain) { "обновление игр: $($data.maintain)" } else { 'обновление игр' }) }
         'await-decision' { 'ждёт ответа на экране' }
         default { $(if ($data.busy) { [string]$data.busy } else { 'свободен' }) }
     }
@@ -287,7 +317,7 @@ function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scrip
     $ps = [powershell]::Create()
     [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $false }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $false }
     return $true
 }
 
@@ -295,7 +325,7 @@ function Update-Query {
     if (-not $script:Running -or -not $script:Running.Async.IsCompleted) { return }
     $job = $script:Running
     $script:Running = $null
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $true }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $true }
     $output = $null
     try { $output = @($job.Ps.EndInvoke($job.Async))[0] } catch { $TxtStatus.Text = "Ошибка опроса: $_" }
     $job.Ps.Dispose()
@@ -318,6 +348,7 @@ $script:Commands = @{
     update = @{ Verb = 'Обновить лаунчер на'; Now = 'Обновить их сразу'; Note = 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.'; Done = 'обновятся' }
     lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
     unlock = @{ Verb = 'РАЗБЛОКИРОВАТЬ'; Now = 'Разблокировать их сразу'; Note = 'Защита UWF выключится, компьютеры перезагрузятся. Пока защита выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать их обратно.'; Done = 'разблокируются' }
+    maintain = @{ Verb = 'Обновить игры на'; Now = 'Начать обновление игр сразу'; Note = 'Защита выключится, кокпит перезагрузится и запустит Steam. Когда загрузки закончатся, защита включится обратно, кокпит перезагрузится. Обслуживание длится от 6 минут до 2 часов. Закончить раньше: кнопка «Заблокировать». Запуск игр на это время закрыт.'; Done = 'начнут обновление' }
     reboot = @{ Verb = 'Перезагрузить'; Now = 'Перезагрузить их сразу'; Note = 'Компьютеры перезагрузятся.'; Done = 'перезагрузятся' }
 }
 
@@ -379,6 +410,7 @@ function Start-RemoteCommand([string]$Action) {
 
 $BtnRefresh.Add_Click({ Start-Refresh })
 $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
+$BtnMaintain.Add_Click({ Start-RemoteCommand 'maintain' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
 $BtnUnlock.Add_Click({ Start-RemoteCommand 'unlock' })
 $BtnReboot.Add_Click({ Start-RemoteCommand 'reboot' })
