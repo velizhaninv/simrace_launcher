@@ -120,45 +120,6 @@ function Select-ServerExe([string]$Folder) {
     return $choice
 }
 
-# Сам сервер Kunos (accServer.exe) в репозиторий не кладём: он берётся из Steam, из установленного Dedicated Server.
-# Программа сервера ищет его рядом с собой. После обновления ACC копия тоже обновится.
-function Copy-AccServerExe {
-    $steamRoots = @()
-    foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam') {
-        $value = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
-        if ($value -and $value.InstallPath) { $steamRoots += $value.InstallPath }
-    }
-    $libraries = @()
-    foreach ($root in $steamRoots) {
-        $libraries += $root
-        $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
-        if (Test-Path -LiteralPath $vdf) {
-            foreach ($match in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw -Encoding UTF8), '"path"\s+"([^"]+)"')) { $libraries += ($match.Groups[1].Value -replace '\\\\', '\') }
-        }
-    }
-    # Выделенный сервер в Steam: «Инструменты» → Assetto Corsa Competizione Dedicated Server. Запасной вариант: папка server у самой игры.
-    $server = $null
-    foreach ($folder in 'Assetto Corsa Competizione Dedicated Server', 'Assetto Corsa Competizione') {
-        foreach ($library in @($libraries | Sort-Object -Unique)) {
-            $candidate = Join-Path $library "steamapps\common\$folder\server\accServer.exe"
-            if (Test-Path -LiteralPath $candidate) { $server = Get-Item -LiteralPath $candidate; break }
-        }
-        if ($server) { break }
-    }
-    if (-not $server) {
-        Write-Warning 'accServer.exe не найден: в Steam не установлен Assetto Corsa Competizione Dedicated Server (раздел «Инструменты»). Программа сервера не запустит сервер.'
-        return
-    }
-    $copy = Join-Path $toolTarget 'accServer.exe'
-    $old = Get-Item -LiteralPath $copy -ErrorAction SilentlyContinue
-    if ($old -and $old.Length -eq $server.Length -and $old.LastWriteTimeUtc -eq $server.LastWriteTimeUtc) { return }
-    try {
-        Copy-Item -LiteralPath $server.FullName -Destination $copy -Force
-        Write-Host "accServer.exe скопирован из $($server.DirectoryName)"
-    }
-    catch { Write-Warning "accServer.exe не обновлён, возможно, сервер запущен: $($_.Exception.Message)" }
-}
-
 # Имя сервера по номеру компьютера: SimRace 10 на SIMRACE-10. Заданное вручную имя не меняется.
 function Set-AccServerName {
     $settings = Join-Path $toolTarget 'cfg\settings.json'
@@ -203,25 +164,6 @@ function Install-ServerTool($Config) {
         }
     }
     catch { Write-Warning "Программа сервера ACC не обновлена, возможно, она открыта: $($_.Exception.Message)" }
-    # Раньше программу сервера клали вручную, вместе с accServer.exe и своими настройками, иногда во вложенную папку.
-    # Если такая рабочая копия есть, кнопка запускает её, как раньше: там настоящие настройки и пароли.
-    $old = @(Get-ChildItem -LiteralPath $toolTarget -Recurse -File -Filter 'accServer.exe' -ErrorAction SilentlyContinue |
-        Where-Object { $_.DirectoryName.TrimEnd('\') -ne $toolTarget.TrimEnd('\') } |
-        ForEach-Object { Get-ChildItem -LiteralPath $_.DirectoryName -File -Filter '*.exe' | Where-Object { $_.Name -match '(?i)dedicated.*server.*gui' } } |
-        Select-Object -First 1)
-    if ($old.Count -gt 0) {
-        $relative = $old[0].FullName.Substring($toolTarget.TrimEnd('\').Length + 1)
-        Write-Host "Программа сервера ACC: найдена прежняя рабочая копия, кнопка ведёт на неё: $relative"
-    }
-    else {
-        Copy-AccServerExe
-        # Steam-сервера нет, но где-то в папке программы лежит accServer.exe: кладём его рядом с программой
-        $copy = Join-Path $toolTarget 'accServer.exe'
-        if (-not (Test-Path -LiteralPath $copy)) {
-            $any = Get-ChildItem -LiteralPath $toolTarget -Recurse -File -Filter 'accServer.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($any) { try { Copy-Item -LiteralPath $any.FullName -Destination $copy -Force } catch { } }
-        }
-    }
     Set-AccServerName
     Get-ChildItem -LiteralPath $toolTarget -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
     # Программа работает под гостем и должна сохранять свои настройки. При включённом UWF они сбрасываются после перезагрузки.
