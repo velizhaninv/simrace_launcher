@@ -2654,10 +2654,42 @@ function New-Tile($App) {
         $button.Add_MouseRightButtonUp({
             param($sender, $e)
             $e.Handled = $true
-            if (-not $script:Session -and -not $script:Sweeping) { Start-Utility $sender.Tag.Extra }
+            if (-not $script:Session -and -not $script:Sweeping -and (Test-AccServerReady $sender.Tag.Extra)) { Start-Utility $sender.Tag.Extra }
         })
     }
     return $button
+}
+
+# Программа сервера ACC ищет accServer.exe в своей папке. Если его там нет, берём из Steam при каждом запуске:
+# так кнопка заработает сразу, как только на компьютер поставят Dedicated Server, без переустановки лаунчера.
+function Test-AccServerReady($Extra) {
+    if (-not $Extra -or -not $Extra.Exe -or $Extra.Exe -notmatch '(?i)ACC Dedicated Server') { return $true }
+    $folder = Split-Path -Parent $Extra.Exe
+    $target = Join-Path $folder 'accServer.exe'
+    if (Test-Path -LiteralPath $target) { return $true }
+    $source = $null
+    foreach ($name in 'Assetto Corsa Competizione Dedicated Server', 'Assetto Corsa Competizione') {
+        foreach ($library in @($script:SteamLibraries)) {
+            $candidate = Join-Path $library "steamapps\common\$name\server\accServer.exe"
+            if (Test-Path -LiteralPath $candidate) { $source = $candidate; break }
+        }
+        if ($source) { break }
+    }
+    if (-not $source) {
+        Write-Log "Сервер ACC: accServer.exe не найден ни рядом с программой, ни в библиотеках Steam: $(@($script:SteamLibraries) -join '; ')"
+        Show-Overlay 'Сервер ACC не установлен' 'На этом компьютере в Steam нет Assetto Corsa Competizione Dedicated Server. Его ставит администратор: Steam → Библиотека → Инструменты.' 'Закрыть'
+        return $false
+    }
+    try {
+        Copy-Item -LiteralPath $source -Destination $target -Force
+        Write-Log "Сервер ACC: accServer.exe скопирован из $source"
+        return $true
+    }
+    catch {
+        Write-Log "Сервер ACC: accServer.exe не скопирован: $_"
+        Show-Overlay 'Сервер ACC не запустился' 'Не удалось подготовить файлы сервера. Позови администратора клуба.' 'Закрыть'
+        return $false
+    }
 }
 
 # ---------- Микшер громкости ----------
