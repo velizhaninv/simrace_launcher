@@ -2667,8 +2667,10 @@ function Test-AccServerReady($Extra) {
     $folder = Split-Path -Parent $Extra.Exe
     $target = Join-Path $folder 'accServer.exe'
     if (Test-Path -LiteralPath $target) { return $true }
-    $source = $null
+    # Сначала ищем рядом: в папке программы сервера могла остаться прежняя копия accServer.exe
+    $source = Get-ChildItem -LiteralPath (Split-Path -Parent $folder) -Recurse -File -Filter 'accServer.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
     foreach ($name in 'Assetto Corsa Competizione Dedicated Server', 'Assetto Corsa Competizione') {
+        if ($source) { break }
         foreach ($library in @($script:SteamLibraries)) {
             $candidate = Join-Path $library "steamapps\common\$name\server\accServer.exe"
             if (Test-Path -LiteralPath $candidate) { $source = $candidate; break }

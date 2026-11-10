@@ -203,7 +203,25 @@ function Install-ServerTool($Config) {
         }
     }
     catch { Write-Warning "Программа сервера ACC не обновлена, возможно, она открыта: $($_.Exception.Message)" }
-    Copy-AccServerExe
+    # Раньше программу сервера клали вручную, вместе с accServer.exe и своими настройками, иногда во вложенную папку.
+    # Если такая рабочая копия есть, кнопка запускает её, как раньше: там настоящие настройки и пароли.
+    $old = @(Get-ChildItem -LiteralPath $toolTarget -Recurse -File -Filter 'accServer.exe' -ErrorAction SilentlyContinue |
+        Where-Object { $_.DirectoryName.TrimEnd('\') -ne $toolTarget.TrimEnd('\') } |
+        ForEach-Object { Get-ChildItem -LiteralPath $_.DirectoryName -File -Filter '*.exe' | Where-Object { $_.Name -match '(?i)dedicated.*server.*gui' } } |
+        Select-Object -First 1)
+    if ($old.Count -gt 0) {
+        $relative = $old[0].FullName.Substring($toolTarget.TrimEnd('\').Length + 1)
+        Write-Host "Программа сервера ACC: найдена прежняя рабочая копия, кнопка ведёт на неё: $relative"
+    }
+    else {
+        Copy-AccServerExe
+        # Steam-сервера нет, но где-то в папке программы лежит accServer.exe: кладём его рядом с программой
+        $copy = Join-Path $toolTarget 'accServer.exe'
+        if (-not (Test-Path -LiteralPath $copy)) {
+            $any = Get-ChildItem -LiteralPath $toolTarget -Recurse -File -Filter 'accServer.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($any) { try { Copy-Item -LiteralPath $any.FullName -Destination $copy -Force } catch { } }
+        }
+    }
     Set-AccServerName
     Get-ChildItem -LiteralPath $toolTarget -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
     # Программа работает под гостем и должна сохранять свои настройки. При включённом UWF они сбрасываются после перезагрузки.
