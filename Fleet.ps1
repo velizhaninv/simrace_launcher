@@ -215,7 +215,18 @@ $RowsScroll.Add_ScrollChanged({
 
 # Строки создаются один раз, чтобы выбор не сбрасывался при обновлении списка
 $script:RowMap = @{}
+# Кокпиты стоят в два ряда: 1–8 и 9–14. Перед каждым рядом небольшая подпись и отступ.
+$script:RowGroups = @{ 'SIMRACE-1' = 'РЯД 1 · КОКПИТЫ 1–8'; 'SIMRACE-9' = 'РЯД 2 · КОКПИТЫ 9–14' }
 foreach ($name in $script:Names) {
+    if ($script:RowGroups.ContainsKey($name)) {
+        $group = New-Object System.Windows.Controls.TextBlock
+        $group.Text = $script:RowGroups[$name]
+        $group.FontSize = 12
+        $group.FontWeight = [System.Windows.FontWeights]::SemiBold
+        $group.Foreground = New-Brush '#E2450F'
+        $group.Margin = New-Object System.Windows.Thickness(8, $(if ($name -eq 'SIMRACE-1') { 4 } else { 22 }), 0, 6)
+        [void]$Rows.Children.Add($group)
+    }
     $border = New-Object System.Windows.Controls.Border
     $border.BorderBrush = New-Brush '#22FFFFFF'
     $border.BorderThickness = New-Object System.Windows.Thickness(0, 1, 0, 0)
