@@ -3432,11 +3432,49 @@ function Open-SteamWindow {
     }
     try {
         Start-Process -FilePath $script:SteamExe -ArgumentList 'steam://open/main'
-        $script:BringTitle = 'Steam'
-        $script:BringUntil = (Get-Date).AddSeconds(20)
         Write-Log 'Steam открыт из панели администратора'
     }
-    catch { Show-AdminNote "Steam не открылся: $($_.Exception.Message)" }
+    catch {
+        Show-AdminNote "Steam не открылся: $($_.Exception.Message)"
+        return
+    }
+    # Лаунчер уходит под все окна и не перехватывает фокус, пока открыт Steam
+    Hide-AdminPanel
+    [SimraceNative]::SetBackground($true)
+    $script:SteamFocus = @{ Until = (Get-Date).AddSeconds(25); Gone = 0 }
+}
+
+# Главное окно Steam: окно процесса Steam с заголовком «Steam». Служебные окна с тем же заголовком скрыты и не подходят.
+function Find-SteamMainWindow {
+    foreach ($process in @(Get-Process -Name steamwebhelper, steam -ErrorAction SilentlyContinue)) {
+        if ($process.MainWindowHandle -ne [IntPtr]::Zero -and $process.MainWindowTitle -eq 'Steam') { return $process.MainWindowHandle }
+    }
+    return [IntPtr]::Zero
+}
+
+# Пока Steam запускается (до 25 секунд), его окно выводим вперёд, как только оно появится или пропадёт за другими.
+# Потом следим: Steam закрыли или свернули — лаунчер возвращается.
+function Update-SteamFocus {
+    $focus = $script:SteamFocus
+    if (-not $focus) { return }
+    if ($script:Session) {
+        $script:SteamFocus = $null
+        return
+    }
+    $window = Find-SteamMainWindow
+    if ((Get-Date) -lt $focus.Until) {
+        # Выводим, только если на переднем плане лаунчер или ничего: окна входа и диалоги Steam не перебиваем
+        $front = [SimraceNative]::CurrentForeground()
+        if ($window -ne [IntPtr]::Zero -and ($front -eq [IntPtr]::Zero -or $front -eq [SimraceNative]::LauncherWindow -or [SimraceNative]::IsMinimized($window))) { [SimraceNative]::ForceForeground($window) }
+        return
+    }
+    if ($window -eq [IntPtr]::Zero -or [SimraceNative]::IsMinimized($window)) { $focus.Gone++ } else { $focus.Gone = 0 }
+    # Две секунды подряд окна нет: возвращаем лаунчер
+    if ($focus.Gone -ge 4) {
+        $script:SteamFocus = $null
+        Write-Log 'Steam закрыт или свёрнут: возвращаю лаунчер'
+        Restore-LauncherWindow
+    }
 }
 
 # ---------- Обслуживание ----------
@@ -4913,6 +4951,7 @@ try {
     $script:LauncherVersion = $(try { (Get-Content -LiteralPath (Join-Path $script:Root 'version.txt') -TotalCount 1 -ErrorAction Stop).Trim() } catch { '' })
     $script:UpdateAvailable = $false
     $script:Maintenance = $false
+    $script:SteamFocus = $null
     $script:MaintainSteamNext = [datetime]::MinValue
     $script:UpdateLatest = ''
     $script:UpdateToastShown = $false
@@ -5204,6 +5243,7 @@ try {
             $script:TickCount++
             Update-GameWindow
             Update-BootGuard
+            Update-SteamFocus
             Update-LayoutLabel
             Update-NetStatusCheck
             Update-TimerDisplay

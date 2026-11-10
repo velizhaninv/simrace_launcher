@@ -126,14 +126,11 @@ $script:QueryScript = {
       </Setter>
     </Style>
   </Window.Resources>
-  <DockPanel Margin="32,26,32,24">
-    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,18">
-      <TextBlock x:Name="TxtLatest" DockPanel.Dock="Right" FontSize="16" Foreground="#A2A6AB" VerticalAlignment="Center"/>
-      <TextBlock Text="Кокпиты SIMRACE" FontSize="30" FontWeight="SemiBold"/>
-    </DockPanel>
+  <DockPanel Margin="28,16,28,18">
     <!-- Над списком: выбор кокпитов и обновление списка -->
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
       <Button x:Name="BtnRefresh" DockPanel.Dock="Right" Content="↻  Обновить список" Style="{StaticResource Link}" Margin="0"/>
+      <TextBlock x:Name="TxtLatest" DockPanel.Dock="Right" FontSize="14" Foreground="#7C8085" VerticalAlignment="Center" Margin="0,0,14,0"/>
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <TextBlock Text="Выбрать:" Foreground="#7C8085" FontSize="15" VerticalAlignment="Center" Margin="2,0,6,0"/>
         <Button x:Name="BtnSelectAll" Content="все на связи" Style="{StaticResource Link}"/>
@@ -224,13 +221,13 @@ foreach ($name in $script:Names) {
         $group.FontSize = 12
         $group.FontWeight = [System.Windows.FontWeights]::SemiBold
         $group.Foreground = New-Brush '#E2450F'
-        $group.Margin = New-Object System.Windows.Thickness(8, $(if ($name -eq 'SIMRACE-1') { 4 } else { 22 }), 0, 6)
+        $group.Margin = New-Object System.Windows.Thickness(8, $(if ($name -eq 'SIMRACE-1') { 2 } else { 16 }), 0, 4)
         [void]$Rows.Children.Add($group)
     }
     $border = New-Object System.Windows.Controls.Border
     $border.BorderBrush = New-Brush '#22FFFFFF'
     $border.BorderThickness = New-Object System.Windows.Thickness(0, 1, 0, 0)
-    $border.Padding = New-Object System.Windows.Thickness(0, 9, 0, 9)
+    $border.Padding = New-Object System.Windows.Thickness(0, 7, 0, 7)
     $grid = New-RowGrid
     $check = New-Object System.Windows.Controls.CheckBox
     $check.VerticalAlignment = 'Center'
