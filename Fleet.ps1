@@ -144,7 +144,6 @@ $script:QueryScript = {
       <TextBlock x:Name="TxtStatus" Foreground="#A2A6AB" TextWrapping="Wrap" Margin="2,0,0,12"/>
       <UniformGrid Rows="1" Margin="0,0,-10,0">
         <Button x:Name="BtnUpdate" Content="Обновить лаунчер" Style="{StaticResource Primary}"/>
-        <Button x:Name="BtnMaintain" Content="Обновить игры" Style="{StaticResource Btn}" ToolTip="Обслуживание: защита выключается, Steam докачивает обновления, защита включается обратно"/>
         <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
         <Button x:Name="BtnUnlock" Content="Разблокировать" Style="{StaticResource Danger}"/>
         <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
@@ -165,7 +164,7 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
@@ -502,13 +501,12 @@ function Show-Result($Row, $Answer, [string]$Latest) {
     $Row.BusyText = [string]$data.busy
     $text = switch ([string]$data.state) {
         'waiting-idle' {
-            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } 'shutdown' { 'выключится' } 'maintain' { 'начнёт обновление игр' } default { 'обновится' } })
+            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } 'shutdown' { 'выключится' } default { 'обновится' } })
             $(if ($data.busy) { "$verb после сеанса ($($data.busy))" } else { "$verb через несколько секунд" })
         }
         'updating' { 'обновляется' }
         'rebooting' { 'перезагружается' }
         'shutdown' { 'выключается' }
-        'maintenance' { $(if ($data.maintain) { "обновление игр: $($data.maintain)" } else { 'обновление игр' }) }
         'await-decision' { 'ждёт ответа на экране' }
         # Без команд в работе: запущенная игра, иначе сеанс или «свободен»
         default { $(if ($game) { "игра: $game" } elseif ($data.busy) { [string]$data.busy } else { 'свободен' }) }
@@ -533,7 +531,7 @@ function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scrip
     $ps = [powershell]::Create()
     [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
     return $true
 }
 
@@ -541,7 +539,7 @@ function Update-Query {
     if (-not $script:Running -or -not $script:Running.Async.IsCompleted) { return }
     $job = $script:Running
     $script:Running = $null
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $true }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $true }
     $output = $null
     try { $output = @($job.Ps.EndInvoke($job.Async))[0] } catch { $TxtStatus.Text = "Ошибка опроса: $_" }
     $job.Ps.Dispose()
@@ -564,7 +562,6 @@ $script:Commands = @{
     update = @{ Verb = 'Обновить лаунчер на'; Now = 'Обновить их сразу'; Note = 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.'; Done = 'обновятся' }
     lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
     unlock = @{ Verb = 'РАЗБЛОКИРОВАТЬ'; Now = 'Разблокировать их сразу'; Note = 'Защита UWF выключится, компьютеры перезагрузятся. Пока защита выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать их обратно.'; Done = 'разблокируются' }
-    maintain = @{ Verb = 'Обновить игры на'; Now = 'Начать обновление игр сразу'; Note = 'Защита выключится, кокпит перезагрузится и запустит Steam. Когда загрузки закончатся, защита включится обратно, кокпит перезагрузится. Обслуживание длится от 6 минут до 2 часов. Закончить раньше: кнопка «Заблокировать». Запуск игр на это время закрыт.'; Done = 'начнут обновление' }
     shutdown = @{ Verb = 'Выключить'; Now = 'Выключить их сразу'; Note = 'Компьютеры выключатся. Включить их обратно можно только кнопкой на корпусе.'; Done = 'выключатся' }
     reboot = @{ Verb = 'Перезагрузить'; Now = 'Перезагрузить их сразу'; Note = 'Компьютеры перезагрузятся.'; Done = 'перезагрузятся' }
 }
@@ -743,7 +740,6 @@ function Show-VolumePopup($Row, $Anchor) {
 
 $BtnRefresh.Add_Click({ Start-Refresh })
 $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
-$BtnMaintain.Add_Click({ Start-RemoteCommand 'maintain' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
 $BtnWake.Add_Click({ Start-Wake })
 $BtnStats.Add_Click({

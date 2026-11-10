@@ -40,7 +40,7 @@
   .vol:hover { background:var(--soft); }
   .vol:disabled { opacity:.3; cursor:default; }
   .status { color:var(--muted); margin:12px 2px; min-height:20px; }
-  .actions { display:grid; grid-template-columns:repeat(7, 1fr); gap:10px; }
+  .actions { display:grid; grid-template-columns:repeat(6, 1fr); gap:10px; }
   .btn { height:46px; border-radius:10px; border:1px solid #2e3135; background:var(--soft); font-weight:600; }
   .btn:hover { border-color:var(--accent); }
   .btn.primary { background:#d23f0d; border-color:#d23f0d; }
@@ -88,7 +88,6 @@
   <div class="status" id="status"></div>
   <div class="actions">
     <button class="btn primary" data-action="update">Обновить лаунчер</button>
-    <button class="btn" data-action="maintain">Обновить игры</button>
     <button class="btn" data-action="lock">Заблокировать</button>
     <button class="btn danger" data-action="unlock">Разблокировать</button>
     <button class="btn" data-action="reboot">Перезагрузить</button>
@@ -119,13 +118,12 @@ const ICONS = {
 };
 const COMMANDS = {
   update:   { verb: 'Обновить лаунчер на', note: 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.', done: 'обновятся' },
-  maintain: { verb: 'Обновить игры на', note: 'Защита выключится, Steam докачает обновления, защита включится обратно. От 6 минут до 2 часов, запуск игр закрыт.', done: 'начнут обновление' },
   lock:     { verb: 'Заблокировать', note: 'Включится защита UWF, компьютеры перезагрузятся.', done: 'заблокируются' },
   unlock:   { verb: 'РАЗБЛОКИРОВАТЬ', note: 'Защита выключится. Пока она выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать обратно.', done: 'разблокируются' },
   reboot:   { verb: 'Перезагрузить', note: 'Компьютеры перезагрузятся.', done: 'перезагрузятся' },
   shutdown: { verb: 'Выключить', note: 'Компьютеры выключатся. Включить можно кнопкой «Включить» или на корпусе.', done: 'выключатся' }
 };
-const WAIT = { lock: 'заблокируется', unlock: 'разблокируется', reboot: 'перезагрузится', shutdown: 'выключится', maintain: 'начнёт обновление игр', update: 'обновится' };
+const WAIT = { lock: 'заблокируется', unlock: 'разблокируется', reboot: 'перезагрузится', shutdown: 'выключится', update: 'обновится' };
 
 let state = { rows: {}, latest: '', wake: [] };
 const selected = new Set();
@@ -194,7 +192,6 @@ function render() {
       case 'updating': now = 'обновляется'; break;
       case 'rebooting': now = 'перезагружается'; break;
       case 'shutdown': now = 'выключается'; break;
-      case 'maintenance': now = d.maintain ? `обновление игр: ${d.maintain}` : 'обновление игр'; break;
       case 'await-decision': now = 'ждёт ответа на экране'; break;
       default: now = game ? `игра: ${game}` : d.busy || 'свободен';
     }
