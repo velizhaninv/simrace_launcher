@@ -25,6 +25,8 @@ $target    = Join-Path $env:ProgramFiles 'SIMRACE\Launcher'
 $taskName  = 'SIMRACE Launcher'
 $taskPath  = '\SIMRACE\'
 $agentTask = 'SIMRACE Agent'
+$webTask   = 'SIMRACE Web'
+$webRule   = 'SIMRACE Web'
 $settingsLink = Join-Path $env:PUBLIC 'Desktop\Настройки лаунчера SIMRACE.lnk'
 $launcherLink = Join-Path $env:PUBLIC 'Desktop\Лаунчер SIMRACE.lnk'
 $fleetLink = Join-Path $env:PUBLIC 'Desktop\Кокпиты SIMRACE.lnk'
@@ -187,6 +189,9 @@ if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
     Stop-ScheduledTask -TaskName $agentTask -TaskPath $taskPath -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $agentTask -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName $webTask -TaskPath $taskPath -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $webTask -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -Name $webRule -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $oldLink) { Remove-Item -LiteralPath $oldLink -Force }
     if (Test-Path -LiteralPath $settingsLink) { Remove-Item -LiteralPath $settingsLink -Force }
     if (Test-Path -LiteralPath $launcherLink) { Remove-Item -LiteralPath $launcherLink -Force }
@@ -203,7 +208,7 @@ if ($Uninstall) {
 
 # Копируем файлы
 New-Item -ItemType Directory -Path (Join-Path $target 'images') -Force | Out-Null
-foreach ($file in 'SimraceLauncher.ps1', 'LauncherSettings.ps1', 'Settings-Launcher.cmd', 'Start-Launcher.cmd', 'Fleet.ps1', 'Fleet.cmd', 'Stats.ps1', 'Stats.cmd', 'UwfPanel.ps1', 'SimraceAgent.ps1', 'Update-Apply.ps1', 'version.txt', 'apps.json', 'facts.txt', 'logo.png', 'background.jpg', 'dash.png', 'dash-off.png', 'qr-telegram.png', 'qr-site.png', 'wheel-nardi.png', 'wheel-cs.png', 'wheel-ks.png') {
+foreach ($file in 'SimraceLauncher.ps1', 'LauncherSettings.ps1', 'Settings-Launcher.cmd', 'Start-Launcher.cmd', 'Fleet.ps1', 'Fleet.cmd', 'Stats.ps1', 'Stats.cmd', 'WebPanel.ps1', 'WebPanel.html', 'UwfPanel.ps1', 'SimraceAgent.ps1', 'Update-Apply.ps1', 'version.txt', 'apps.json', 'facts.txt', 'logo.png', 'background.jpg', 'dash.png', 'dash-off.png', 'qr-telegram.png', 'qr-site.png', 'wheel-nardi.png', 'wheel-cs.png', 'wheel-ks.png') {
     $source = Join-Path $PSScriptRoot $file
     # При обновлении настройки сохраняются: игры, логины и кнопки под плитками
     if ($file -eq 'apps.json' -and -not $ResetConfig -and (Test-Path -LiteralPath (Join-Path $target 'apps.json'))) {
@@ -361,6 +366,20 @@ if (Test-Path -LiteralPath $accServerExe) {
 # Обновление по сети: служба принимает подключения только из локальной сети
 Remove-NetFirewallRule -Name $firewallRule -ErrorAction SilentlyContinue
 New-NetFirewallRule -Name $firewallRule -DisplayName 'SIMRACE: обновление лаунчера по сети' -Direction Inbound -Protocol TCP -LocalPort 47615 -RemoteAddress LocalSubnet -Action Allow -Profile Any | Out-Null
+
+# Веб-панель: только на SIMRACE-14, от имени SYSTEM, с загрузки. Открывается в браузере: http://SIMRACE-14:8014
+if ($env:COMPUTERNAME -match '(?i)-14$') {
+    $webAction    = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$target\WebPanel.ps1`"" -WorkingDirectory $target
+    $webTrigger   = New-ScheduledTaskTrigger -AtStartup
+    $webPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $webSettings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $webTask -TaskPath $taskPath -Action $webAction -Trigger $webTrigger -Principal $webPrincipal -Settings $webSettings -Force | Out-Null
+    # Панель не запускает установку, поэтому её можно перезапустить сразу: заработает новая версия
+    Stop-ScheduledTask -TaskName $webTask -TaskPath $taskPath -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName $webTask -TaskPath $taskPath -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -Name $webRule -ErrorAction SilentlyContinue
+    New-NetFirewallRule -Name $webRule -DisplayName 'SIMRACE: веб-панель кокпитов' -Direction Inbound -Protocol TCP -LocalPort 8014 -RemoteAddress LocalSubnet -Action Allow -Profile Any | Out-Null
+}
 
 # Окно «Кокпиты SIMRACE» нужно только на администраторском компьютере
 if ($env:COMPUTERNAME -match '(?i)-14$') {

@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кокпиты SIMRACE</title>
+<style>
+  :root { --bg:#0e0f11; --panel:#141518; --line:#2a2d31; --soft:#1c1e21; --text:#fff; --muted:#a2a6ab; --dim:#7c8085;
+          --accent:#e2450f; --green:#37c552; --red:#e5301a; --yellow:#e9c62a; --amber:#ffb020; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px "Segoe UI", system-ui, sans-serif; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  .wrap { padding:16px 24px 20px; max-width:1500px; margin:0 auto; }
+  /* Вход */
+  #login { display:none; min-height:100vh; align-items:center; justify-content:center; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:28px; width:min(380px, 92vw); }
+  .card h1 { margin:0 0 4px; font-size:22px; }
+  .card p { margin:0 0 18px; color:var(--muted); font-size:14px; }
+  input[type=password] { width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line); background:var(--soft); color:var(--text); font-size:16px; }
+  input[type=password]:focus { outline:none; border-color:var(--accent); }
+  .err { color:#ff6a55; min-height:20px; margin:10px 0 0; font-size:14px; }
+  /* Панель */
+  #app { display:none; }
+  .top { display:flex; align-items:center; gap:4px; margin-bottom:10px; flex-wrap:wrap; }
+  .top .title { font-size:18px; font-weight:600; margin-right:16px; }
+  .top .grow { flex:1; }
+  .link { background:transparent; border:0; color:#c9ccd0; padding:6px 12px; border-radius:8px; }
+  .link:hover { background:var(--soft); color:#fff; }
+  .note { color:var(--dim); font-size:13px; margin-right:8px; }
+  .table { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:4px 10px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; min-width:1100px; }
+  th { text-align:left; font-size:12px; color:var(--dim); font-weight:600; padding:10px 8px 8px; position:sticky; top:0; background:var(--panel); }
+  td { padding:6px 8px; border-top:1px solid rgba(255,255,255,.13); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:300px; }
+  tr.group td { border-top:0; color:var(--accent); font-size:12px; font-weight:600; padding:10px 8px 3px; }
+  td.name { font-weight:600; }
+  input[type=checkbox] { width:18px; height:18px; accent-color:var(--accent); }
+  .icons { display:flex; gap:8px; }
+  .icons svg { width:22px; height:22px; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .vol { background:transparent; border:0; padding:4px 8px; border-radius:8px; }
+  .vol:hover { background:var(--soft); }
+  .vol:disabled { opacity:.3; cursor:default; }
+  .status { color:var(--muted); margin:12px 2px; min-height:20px; }
+  .actions { display:grid; grid-template-columns:repeat(7, 1fr); gap:10px; }
+  .btn { height:46px; border-radius:10px; border:1px solid #2e3135; background:var(--soft); font-weight:600; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.primary { background:#d23f0d; border-color:#d23f0d; }
+  .btn.primary:hover { background:#e8501b; }
+  .btn.danger { color:#ff6a55; }
+  .btn:disabled { opacity:.45; cursor:default; }
+  @media (max-width:900px) { .actions { grid-template-columns:repeat(2, 1fr); } .wrap { padding:12px; } }
+  /* Окно громкости */
+  #volume { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); align-items:center; justify-content:center; }
+  .slider { margin:14px 0 2px; display:flex; justify-content:space-between; color:#c9ccd0; }
+  .slider b { color:#fff; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <form class="card" id="loginForm">
+    <h1>Кокпиты SIMRACE</h1>
+    <p>Пароль администратора SIMRACE-14</p>
+    <input type="password" id="password" autocomplete="current-password" autofocus>
+    <div class="err" id="loginError"></div>
+    <button class="btn primary" style="width:100%; margin-top:8px">Войти</button>
+  </form>
+</div>
+
+<div id="app" class="wrap">
+  <div class="top">
+    <span class="title">Кокпиты SIMRACE</span>
+    <span class="note">Выбрать:</span>
+    <button class="link" data-select="online">все на связи</button>
+    <button class="link" data-select="old">устаревшие</button>
+    <button class="link" data-select="none">снять выбор</button>
+    <span class="grow"></span>
+    <span class="note" id="latest"></span>
+    <button class="link" id="logout">Выйти</button>
+  </div>
+  <div class="table">
+    <table>
+      <thead><tr><th style="width:36px"></th><th>КОКПИТ</th><th>СОСТОЯНИЕ</th><th>ВЕРСИЯ</th><th>ЗАЩИТА</th><th>OVERLAY</th><th>ФАЙЛ ПОДКАЧКИ</th><th>СЕАНС</th><th>СЕЙЧАС</th><th>ЗВУК</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="status" id="status"></div>
+  <div class="actions">
+    <button class="btn primary" data-action="update">Обновить лаунчер</button>
+    <button class="btn" data-action="maintain">Обновить игры</button>
+    <button class="btn" data-action="lock">Заблокировать</button>
+    <button class="btn danger" data-action="unlock">Разблокировать</button>
+    <button class="btn" data-action="reboot">Перезагрузить</button>
+    <button class="btn" id="wake">Включить</button>
+    <button class="btn" data-action="shutdown">Выключить</button>
+  </div>
+</div>
+
+<div id="volume">
+  <div class="card">
+    <h1 id="volTitle" style="font-size:18px">Громкость</h1>
+    <div id="volSliders"></div>
+    <p style="margin:14px 0 0">Если игра или Mumble сейчас молчат, громкость применится, когда они зазвучат.</p>
+    <div class="row2"><button class="btn primary" id="volApply">Применить</button><button class="btn" id="volCancel">Отмена</button></div>
+  </div>
+</div>
+
+<script>
+const NAMES = Array.from({ length: 14 }, (_, i) => 'SIMRACE-' + (i + 1));
+const GROUPS = { 'SIMRACE-1': 'РЯД 1 · КОКПИТЫ 1–8', 'SIMRACE-9': 'РЯД 2 · КОКПИТЫ 9–14' };
+const ICONS = {
+  internet: 'M11,3 A8,8 0 1 0 11.01,3 Z M3,11 H19 M11,3 C7.5,6.5 7.5,15.5 11,19 M11,3 C14.5,6.5 14.5,15.5 11,19',
+  net: 'M3,5 H19 V15 H15 V18.5 H7 V15 H3 Z M7,8.5 V11 M10,8.5 V11 M12,8.5 V11 M15,8.5 V11',
+  wifi: 'M2,8.5 C6.8,4 15.2,4 20,8.5 M5,11.6 C8.3,8.7 13.7,8.7 17,11.6 M8,14.7 C9.7,13.4 12.3,13.4 14,14.7 M10.3,18 A0.7,0.7 0 1 1 11.7,18 A0.7,0.7 0 1 1 10.3,18',
+  base: 'M11,3 A8,8 0 1 0 11.01,3 Z M11,9 A2,2 0 1 0 11.01,9 Z M3.2,10 L9,11 M18.8,10 L13,11 M11,13 V19',
+  vpn: 'M11,2.5 L18,5.5 V10.5 C18,14.8 15,18 11,19.5 C7,18 4,14.8 4,10.5 V5.5 Z',
+  speaker: 'M3,9 H7 L12,5 V17 L7,13 H3 Z M15,8 Q17.5,11 15,14 M17.5,5.5 Q21.5,11 17.5,16.5'
+};
+const COMMANDS = {
+  update:   { verb: 'Обновить лаунчер на', note: 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.', done: 'обновятся' },
+  maintain: { verb: 'Обновить игры на', note: 'Защита выключится, Steam докачает обновления, защита включится обратно. От 6 минут до 2 часов, запуск игр закрыт.', done: 'начнут обновление' },
+  lock:     { verb: 'Заблокировать', note: 'Включится защита UWF, компьютеры перезагрузятся.', done: 'заблокируются' },
+  unlock:   { verb: 'РАЗБЛОКИРОВАТЬ', note: 'Защита выключится. Пока она выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать обратно.', done: 'разблокируются' },
+  reboot:   { verb: 'Перезагрузить', note: 'Компьютеры перезагрузятся.', done: 'перезагрузятся' },
+  shutdown: { verb: 'Выключить', note: 'Компьютеры выключатся. Включить можно кнопкой «Включить» или на корпусе.', done: 'выключатся' }
+};
+const WAIT = { lock: 'заблокируется', unlock: 'разблокируется', reboot: 'перезагрузится', shutdown: 'выключится', maintain: 'начнёт обновление игр', update: 'обновится' };
+
+let state = { rows: {}, latest: '', wake: [] };
+const selected = new Set();
+let busy = false;
+let statusHold = 0;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function api(path, body) {
+  const options = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Simrace': '1' }, body: JSON.stringify(body) };
+  const response = await fetch(path, options);
+  if (response.status === 401 && path !== '/api/login') { showLogin(); throw new Error('Нужен вход'); }
+  return response.json();
+}
+
+function setStatus(text, hold) { $('status').textContent = text; statusHold = hold ? Date.now() + hold : 0; }
+
+function icon(key, color, tip) {
+  return `<span title="${esc(tip)}"><svg viewBox="0 0 22 22" style="stroke:${color}"><path d="${ICONS[key]}"/></svg></span>`;
+}
+
+function health(data) {
+  const s = data.session, g = '#37c552', r = '#e5301a', y = '#e9c62a', n = '#5a5e63';
+  if (!s) return ['internet', 'net', 'base', 'vpn'].map(k => icon(k, n, 'Лаунчер не запущен: состояние неизвестно')).join('');
+  const out = [];
+  out.push(s.internet == null ? icon('internet', n, 'Интернет: ещё не проверен') : s.internet ? icon('internet', g, 'Интернет есть') : icon('internet', r, 'Интернета нет'));
+  out.push(s.net === 'ethernet' ? icon('net', g, 'Подключено по кабелю') : s.net === 'wifi' ? icon('wifi', y, 'Подключено по Wi-Fi: включение по сети не сработает') : s.net === 'none' ? icon('net', r, 'Нет подключения к сети') : icon('net', n, 'Подключение: ещё не проверено'));
+  out.push(s.base == null ? icon('base', n, 'База MOZA: ещё не проверена') : s.base ? icon('base', g, 'База MOZA подключена') : icon('base', r, 'База MOZA не найдена'));
+  out.push(s.vpn === 'on' ? icon('vpn', g, 'VPN включён') : s.vpn === 'idle' ? icon('vpn', y, 'VPN запущен, но не подключён') : icon('vpn', n, s.vpn === 'off' ? 'VPN выключен' : 'VPN: ещё не проверен'));
+  return out.join('');
+}
+
+function gb(mb) { return (mb / 1024).toFixed(mb >= 10240 ? 0 : 1).replace('.', ','); }
+
+function render() {
+  const rows = [];
+  for (const name of NAMES) {
+    if (GROUPS[name]) rows.push(`<tr class="group"><td colspan="10">${GROUPS[name]}</td></tr>`);
+    const d = state.rows[name];
+    const checked = selected.has(name) ? 'checked' : '';
+    if (!d || !d.ok) {
+      rows.push(`<tr><td><input type="checkbox" data-name="${name}" ${checked}></td><td class="name">${name}</td><td style="color:var(--red)">нет связи</td><td></td><td></td><td></td><td></td><td></td><td style="color:var(--dim)">выключен или служба старая</td><td></td></tr>`);
+      continue;
+    }
+    const s = d.session;
+    const old = state.latest && d.version !== state.latest;
+    let uwf = d.uwfNow ? 'включена' : 'выключена';
+    if (!!d.uwfNow !== !!d.uwfNext) uwf += d.uwfNext ? ' → вкл' : ' → выкл';
+    const total = (d.usedMb || 0) + (d.freeMb || 0);
+    let overlay = '—', overColor = 'var(--dim)';
+    if (d.uwfNow && total > 0) { const part = d.usedMb / total; overlay = `${gb(d.usedMb)} / ${Math.round(total / 1024)} ГБ`; overColor = part >= .9 ? 'var(--red)' : part >= .75 ? 'var(--amber)' : '#fff'; }
+    const pages = (d.pages || []).filter(Boolean).map(p => p.split('|')).filter(p => +p[1] > 0);
+    const page = pages.length ? pages.map(p => `${p[0].slice(0, 2)} ${gb(+p[1])} ГБ`).join(', ') : 'не работает';
+    const pageColor = !pages.length ? 'var(--red)' : pages.some(p => p[0].startsWith('Z:')) ? 'var(--green)' : 'var(--amber)';
+    let session = '—', sessionColor = 'var(--dim)';
+    if (s && s.active) {
+      const m = Math.floor(s.elapsed / 60);
+      session = `с ${esc(s.start)} · ${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}${s.paused ? ' · пауза' : ''}`;
+      sessionColor = s.paused ? 'var(--amber)' : '#fff';
+    }
+    const game = s && s.game ? s.game : '';
+    let now, nowColor;
+    switch (d.state) {
+      case 'waiting-idle': now = d.busy ? `${WAIT[d.pending] || 'обновится'} после сеанса (${d.busy})` : `${WAIT[d.pending] || 'обновится'} через несколько секунд`; break;
+      case 'updating': now = 'обновляется'; break;
+      case 'rebooting': now = 'перезагружается'; break;
+      case 'shutdown': now = 'выключается'; break;
+      case 'maintenance': now = d.maintain ? `обновление игр: ${d.maintain}` : 'обновление игр'; break;
+      case 'await-decision': now = 'ждёт ответа на экране'; break;
+      default: now = game ? `игра: ${game}` : d.busy || 'свободен';
+    }
+    nowColor = d.state && d.state !== 'idle' ? 'var(--amber)' : game ? '#fff' : d.busy ? '#b4b8bc' : 'var(--green)';
+    if (d.message && d.updateOk === false) { now = d.message; nowColor = '#ff6a55'; }
+    rows.push(`<tr>
+      <td><input type="checkbox" data-name="${name}" ${checked}></td>
+      <td class="name" style="color:${d.uwfNow ? '#fff' : '#ff6a55'}" title="${d.uwfNow ? '' : 'Защита выключена'}">${name}</td>
+      <td><div class="icons">${health(d)}</div></td>
+      <td style="color:${old ? 'var(--amber)' : '#fff'}">${esc(d.version)}</td>
+      <td style="color:${d.uwfNow ? 'var(--green)' : 'var(--red)'}">${uwf}</td>
+      <td style="color:${overColor}">${overlay}</td>
+      <td style="color:${pageColor}">${page}</td>
+      <td style="color:${sessionColor}">${session}</td>
+      <td style="color:${nowColor}" title="${esc(now)}">${esc(now)}</td>
+      <td><button class="vol" data-volume="${name}" ${s ? '' : 'disabled'} title="Громкость на ${name}"><svg viewBox="0 0 22 22" width="22" height="22"><path d="${ICONS.speaker}" fill="none" stroke="#c9ccd0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></td>
+    </tr>`);
+  }
+  $('rows').innerHTML = rows.join('');
+  $('latest').textContent = state.latest ? `Последняя версия: ${state.latest}${state.at ? ' · обновлено ' + state.at : ''}` : '';
+  if (!statusHold || Date.now() > statusHold) {
+    const online = NAMES.filter(n => state.rows[n] && state.rows[n].ok).length;
+    setStatus(`На связи: ${online} из ${NAMES.length}. Выбрано: ${selected.size}.`);
+  }
+}
+
+async function refresh() {
+  try {
+    const data = await api('/api/state');
+    if (data.ok) { state = data; render(); }
+  } catch (e) { }
+}
+
+function setBusy(on) { busy = on; document.querySelectorAll('.actions .btn').forEach(b => b.disabled = on); }
+
+async function runCommand(action) {
+  const names = [...selected];
+  if (!names.length) return setStatus('Отметь кокпиты галочками.', 5000);
+  const text = COMMANDS[action];
+  // Кокпиты, которые уже ждут конца сеанса с этой командой: можно выполнить сразу
+  const waiting = names.filter(n => state.rows[n] && state.rows[n].state === 'waiting-idle' && state.rows[n].pending === action);
+  let force = [];
+  if (waiting.length) {
+    if (confirm(`Эти кокпиты уже ждут конца сеанса: ${waiting.join(', ')}.\n\nВыполнить сразу, не дожидаясь? Если там идёт игра, она закроется.`)) force = waiting;
+    else return;
+  }
+  const fresh = names.filter(n => !force.includes(n));
+  if (fresh.length) {
+    const busyNames = fresh.filter(n => state.rows[n] && state.rows[n].busy);
+    let question = `${text.verb}: ${fresh.join(', ')}?\n\n${text.note}`;
+    if (busyNames.length) question += `\n\nСейчас заняты: ${busyNames.join(', ')}. Они ${text.done}, когда закончится сеанс.`;
+    if (!confirm(question)) return;
+  }
+  setBusy(true);
+  setStatus('Отправляю команду...');
+  try {
+    const data = await api('/api/command', { action, names, force });
+    const failed = Object.entries(data.results || {}).filter(([, r]) => !r.ok).map(([n, r]) => `${n} (${r.error})`);
+    setStatus(failed.length ? `Команда отправлена. Отказ: ${failed.join('; ')}.` : 'Команда отправлена. Ход выполнения видно в столбце «Сейчас».', 30000);
+    names.forEach(n => selected.delete(n));
+  } catch (e) { setStatus('Команда не отправлена: ' + e.message, 15000); }
+  setBusy(false);
+  refresh();
+}
+
+async function wake() {
+  const names = [...selected].filter(n => !(state.rows[n] && state.rows[n].ok));
+  if (!names.length) return setStatus('Отметь выключенные кокпиты галочками.', 5000);
+  try {
+    const data = await api('/api/wake', { names });
+    const parts = [];
+    if (data.sent.length) parts.push(`Сигнал включения отправлен: ${data.sent.join(', ')}. Кокпиты появятся на связи через 1–2 минуты.`);
+    if (data.unknown.length) parts.push(`Адрес сетевой карты неизвестен: ${data.unknown.join(', ')}. Включи их один раз вручную.`);
+    setStatus(parts.join(' '), 30000);
+    data.sent.forEach(n => selected.delete(n));
+    render();
+  } catch (e) { setStatus('Сигнал не отправлен: ' + e.message, 15000); }
+}
+
+// ---------- Громкость ----------
+let volumeName = '';
+function openVolume(name) {
+  const s = (state.rows[name] || {}).session;
+  if (!s) return;
+  volumeName = name;
+  $('volTitle').textContent = 'Громкость · ' + name;
+  const items = [['system', 'Система', s.system], ['game', 'Игра', s.gameVolume], ['mumble', 'Mumble', s.mumble]];
+  $('volSliders').innerHTML = items.map(([key, title, value]) => {
+    const known = value !== null && value !== undefined;
+    return `<div class="slider"><span>${title}</span><b id="v_${key}">${known ? value + '%' : 'не звучит'}</b></div>
+            <input type="range" min="0" max="100" value="${known ? value : 100}" data-key="${key}" data-changed="${known}">`;
+  }).join('');
+  $('volSliders').querySelectorAll('input').forEach(input => input.addEventListener('input', () => {
+    input.dataset.changed = 'true';
+    $('v_' + input.dataset.key).textContent = input.value + '%';
+  }));
+  $('volume').style.display = 'flex';
+}
+$('volCancel').onclick = () => $('volume').style.display = 'none';
+$('volApply').onclick = async () => {
+  const body = { name: volumeName };
+  $('volSliders').querySelectorAll('input').forEach(input => { if (input.dataset.changed === 'true') body[input.dataset.key] = +input.value; });
+  $('volume').style.display = 'none';
+  try {
+    const data = await api('/api/volume', body);
+    const result = (data.results || {})[volumeName];
+    setStatus(result && result.ok ? `Громкость на ${volumeName} изменена.` : `${volumeName}: ${result ? result.error : 'не ответил'}`, 15000);
+  } catch (e) { setStatus('Громкость не изменена: ' + e.message, 15000); }
+};
+
+// ---------- События ----------
+$('rows').addEventListener('change', e => {
+  const name = e.target.dataset && e.target.dataset.name;
+  if (!name) return;
+  e.target.checked ? selected.add(name) : selected.delete(name);
+  render();
+});
+$('rows').addEventListener('click', e => {
+  const button = e.target.closest('[data-volume]');
+  if (button && !button.disabled) openVolume(button.dataset.volume);
+});
+document.querySelectorAll('[data-select]').forEach(b => b.onclick = () => {
+  selected.clear();
+  for (const n of NAMES) {
+    const d = state.rows[n];
+    if (b.dataset.select === 'online' && d && d.ok) selected.add(n);
+    if (b.dataset.select === 'old' && d && d.ok && state.latest && d.version !== state.latest) selected.add(n);
+  }
+  render();
+});
+document.querySelectorAll('[data-action]').forEach(b => b.onclick = () => !busy && runCommand(b.dataset.action));
+$('wake').onclick = () => wake();
+$('logout').onclick = async () => { try { await api('/api/logout', {}); } catch (e) { } showLogin(); };
+
+function showLogin() { $('app').style.display = 'none'; $('login').style.display = 'flex'; $('password').focus(); }
+function showApp() { $('login').style.display = 'none'; $('app').style.display = 'block'; refresh(); }
+
+$('loginForm').onsubmit = async e => {
+  e.preventDefault();
+  $('loginError').textContent = '';
+  try {
+    const data = await api('/api/login', { password: $('password').value });
+    $('password').value = '';
+    if (data.ok) showApp(); else $('loginError').textContent = data.error || 'Не удалось войти';
+  } catch (err) { $('loginError').textContent = 'Нет связи с SIMRACE-14'; }
+};
+
+// Обновление списка каждые 5 секунд, пока не открыто окно громкости
+setInterval(() => { if ($('app').style.display === 'block' && $('volume').style.display !== 'flex') refresh(); }, 5000);
+fetch('/api/state').then(r => r.status === 401 ? showLogin() : showApp()).catch(showLogin);
+</script>
+</body>
+</html>
