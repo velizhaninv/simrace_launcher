@@ -3486,7 +3486,7 @@ function Close-Launcher([int]$Code) {
 # ---------- Опрос службы в фоне: окно не ждёт её ответа ----------
 
 function Start-AgentPoller {
-    $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false; Busy = $false; Latest = ''
+    $script:AgentShared = [hashtable]::Synchronized(@{ Status = $null; Overlay = $null; Stop = $false; Busy = $false; Latest = ''; Line = ''
         VersionUrl = 'https://raw.githubusercontent.com/velizhaninv/simrace_launcher/main/version.txt' })
     $ps = [powershell]::Create()
     [void]$ps.AddScript({
@@ -3517,7 +3517,8 @@ function Start-AgentPoller {
                 }
                 catch { $nextVersion = (Get-Date).AddMinutes(10) }
             }
-            $Shared.Status = Send-Line $(if ($Shared.Busy) { '{"action":"status","session":true}' } else { '{"action":"status","session":false}' })
+            # Строку с отчётом готовит окно лаунчера: сеанс, игра, громкость
+            $Shared.Status = Send-Line $(if ($Shared.Line) { [string]$Shared.Line } elseif ($Shared.Busy) { '{"action":"status","session":true}' } else { '{"action":"status","session":false}' })
             if ($tick % 5 -eq 0) { $Shared.Overlay = Send-Line '{"action":"overlay"}' }
             $tick++
             Start-Sleep -Seconds 2
@@ -3525,6 +3526,59 @@ function Start-AgentPoller {
     }).AddArgument($script:AgentShared)
     $script:AgentPoller = $ps
     [void]$ps.BeginInvoke()
+}
+
+# ---------- Отчёт для окна «Кокпиты» и громкость с SIMRACE-14 ----------
+
+$script:VolumeAck = ''
+
+# Громкость звуковой группы: если программа сейчас молчит, отдаём выбранное значение
+function Get-ReportVolume([string]$Group, $Chosen) {
+    $level = [SimraceAudio]::GetGroup($Group)
+    if ($level -lt 0) { if ($null -ne $Chosen) { $level = $Chosen } else { return $null } }
+    return [int][Math]::Round($level * 100)
+}
+
+function Update-AgentReport {
+    if (-not $script:AgentShared) { return }
+    # Сначала применяем громкость, если её прислали с SIMRACE-14
+    $status = Get-AgentShared 'Status'
+    if ($status -and $status.volume -and [string]$status.volume.id -ne $script:VolumeAck -and $script:AudioReady) {
+        $command = $status.volume
+        try {
+            if ($null -ne $command.system) { [SimraceAudio]::SetSystem([float]($command.system / 100)) }
+            if ($null -ne $command.game) {
+                $script:GameLevel = $command.game / 100
+                [SimraceAudio]::SetGroup('game', [float]$script:GameLevel)
+            }
+            if ($null -ne $command.mumble) {
+                $script:MumbleLevel = $command.mumble / 100
+                [SimraceAudio]::SetGroup('mumble', [float]$script:MumbleLevel)
+            }
+            Write-Log "Громкость с SIMRACE-14: система $($command.system), игра $($command.game), Mumble $($command.mumble)"
+        }
+        catch { Write-Log "Громкость с SIMRACE-14 не применена: $_" }
+        $script:VolumeAck = [string]$command.id
+    }
+    $active = [bool]($script:TimerState -ne 'idle')
+    $report = [ordered]@{
+        action = 'status'
+        session = [bool]($script:Config.requireSession -ne $false -and $active)
+        paused = [bool]($script:TimerState -eq 'paused')
+        game = $(if ($script:Session) { [string]$script:Session.App.Name } else { '' })
+        start = $(if ($active) { $script:TimerStart.ToString('HH:mm') } else { '' })
+        elapsed = $(if ($active) { [int](Get-SessionElapsed).TotalSeconds } else { 0 })
+        volAck = $script:VolumeAck
+    }
+    if ($script:AudioReady) {
+        try {
+            $report.volSystem = [int][Math]::Round([SimraceAudio]::GetSystem() * 100)
+            $report.volGame = Get-ReportVolume 'game' $script:GameLevel
+            $report.volMumble = Get-ReportVolume 'mumble' $script:MumbleLevel
+        }
+        catch { }
+    }
+    $script:AgentShared.Line = ($report | ConvertTo-Json -Compress)
 }
 
 # ---------- Уведомление об обновлении ----------
@@ -5160,6 +5214,7 @@ try {
             if ($script:TickCount % 4 -eq 1) { Update-MaintenanceMode }
             # Для обновления по сети: служба дождётся конца сеанса
             if ($script:AgentShared) { $script:AgentShared.Busy = [bool]($script:Config.requireSession -ne $false -and $script:TimerState -ne 'idle') }
+            if ($script:TickCount % 4 -eq 0) { Update-AgentReport }
             if ($script:TickCount % 6 -eq 0) {
                 Update-AgentStatus
                 Update-LockStatus

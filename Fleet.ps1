@@ -61,7 +61,7 @@ $script:QueryScript = {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Кокпиты SIMRACE" Width="1320" Height="860" MinWidth="1100" MinHeight="600" WindowStartupLocation="CenterScreen"
+        Title="Кокпиты SIMRACE" Width="1480" Height="880" MinWidth="1240" MinHeight="600" WindowStartupLocation="CenterScreen"
         Background="#0E0F11" Foreground="White" FontFamily="Segoe UI" FontSize="16">
   <Window.Resources>
     <!-- Команды внизу: одинаковые по размеру -->
@@ -150,6 +150,7 @@ $script:QueryScript = {
         <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
         <Button x:Name="BtnUnlock" Content="Разблокировать" Style="{StaticResource Danger}"/>
         <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
+        <Button x:Name="BtnShutdown" Content="Выключить" Style="{StaticResource Btn}"/>
       </UniformGrid>
     </StackPanel>
     <Border Background="#141518" BorderBrush="#2A2D31" BorderThickness="1" CornerRadius="14" Padding="10,6">
@@ -161,11 +162,12 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
-$script:Widths = @(44, 170, 130, 150, 120, 230, 170, 0)
+# Галочка, кокпит, связь, версия, защита, overlay, файл подкачки, игра и сеанс, сейчас, громкость
+$script:Widths = @(40, 130, 100, 130, 110, 130, 140, 250, 0, 60)
 function New-Brush([string]$Color) { return (New-Object System.Windows.Media.BrushConverter).ConvertFromString($Color) }
 
 function New-Cell([System.Windows.Controls.Grid]$Grid, [int]$Column, [string]$Text, [string]$Color = '#FFFFFF', [bool]$Bold = $false) {
@@ -195,7 +197,7 @@ function New-RowGrid {
 $header = New-RowGrid
 $header.Margin = New-Object System.Windows.Thickness(0, 6, 0, 8)
 $column = 1
-foreach ($title in 'КОКПИТ', 'СВЯЗЬ', 'ВЕРСИЯ', 'ЗАЩИТА', 'OVERLAY', 'ФАЙЛ ПОДКАЧКИ', 'СЕЙЧАС') {
+foreach ($title in 'КОКПИТ', 'СВЯЗЬ', 'ВЕРСИЯ', 'ЗАЩИТА', 'OVERLAY', 'ФАЙЛ ПОДКАЧКИ', 'ИГРА · СЕАНС', 'СЕЙЧАС', 'ЗВУК') {
     $cell = New-Cell $header $column $title '#7C8085' $true
     $cell.FontSize = 12
     $column++
@@ -222,8 +224,22 @@ foreach ($name in $script:Names) {
         Uwf = (New-Cell $grid 4 '')
         Over = (New-Cell $grid 5 '')
         Page = (New-Cell $grid 6 '')
-        Now = (New-Cell $grid 7 '')
+        Session = (New-Cell $grid 7 '')
+        Now = (New-Cell $grid 8 '')
+        Volumes = $null
     }
+    # Кнопка громкости: открывает ползунки для этого кокпита
+    $volumeButton = New-Object System.Windows.Controls.Button
+    $volumeButton.Style = $Window.FindResource('Link')
+    $volumeButton.HorizontalAlignment = 'Center'
+    $volumeButton.ToolTip = "Громкость на $name"
+    $volumeButton.Content = [System.Windows.Markup.XamlReader]::Parse('<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="22" Height="22"><Path Data="M3,9 H7 L12,5 V17 L7,13 H3 Z" Fill="#C9CCD0"/><Path Data="M15,8 Q17.5,11 15,14 M17.5,5.5 Q21.5,11 17.5,16.5" Stroke="#C9CCD0" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas>')
+    $volumeButton.Tag = $name
+    $volumeButton.IsEnabled = $false
+    $volumeButton.Add_Click({ param($sender) Show-VolumePopup $script:RowMap[[string]$sender.Tag] $sender })
+    [System.Windows.Controls.Grid]::SetColumn($volumeButton, 9)
+    [void]$grid.Children.Add($volumeButton)
+    $row | Add-Member -NotePropertyName VolumeButton -NotePropertyValue $volumeButton
     # Имя кокпита краснеет, когда защита выключена: такой кокпит нужно заблокировать обратно
     $row | Add-Member -NotePropertyName NameCell -NotePropertyValue (New-Cell $grid 1 $name '#FFFFFF' $true)
     $border.Child = $grid
@@ -238,7 +254,9 @@ function Show-Result($Row, $Answer, [string]$Latest) {
         $Row.Online = $false
         $Row.Link.Text = 'нет связи'
         $Row.Link.Foreground = New-Brush '#E5301A'
-        foreach ($cell in $Row.Ver, $Row.Uwf, $Row.Over, $Row.Page, $Row.Now) { $cell.Text = '' }
+        foreach ($cell in $Row.Ver, $Row.Uwf, $Row.Over, $Row.Page, $Row.Session, $Row.Now) { $cell.Text = '' }
+        $Row.VolumeButton.IsEnabled = $false
+        $Row.Volumes = $null
         $Row.NameCell.Foreground = New-Brush '#FFFFFF'
         $Row.Now.Text = 'выключен или служба старая'
         $Row.Now.Foreground = New-Brush '#7C8085'
@@ -282,17 +300,42 @@ function Show-Result($Row, $Answer, [string]$Latest) {
         $Row.Page.Foreground = New-Brush $(if (@($pages | Where-Object { $_.Name -like 'Z:*' }).Count -gt 0) { '#37C552' } else { '#FFB020' })
     }
 
+    # Игра и сеанс по отчёту лаунчера
+    $session = $data.session
+    $Row.Volumes = $session
+    $Row.VolumeButton.IsEnabled = [bool]$session
+    if ($session -and $session.active) {
+        $span = [TimeSpan]::FromSeconds([int]$session.elapsed)
+        $parts = @()
+        if ($session.game) { $parts += [string]$session.game }
+        $parts += "с $($session.start)"
+        $parts += ('{0}:{1:00}' -f [int][Math]::Floor($span.TotalHours), $span.Minutes)
+        if ($session.paused) { $parts += 'пауза' }
+        $Row.Session.Text = $parts -join ' · '
+        $Row.Session.Foreground = New-Brush $(if ($session.paused) { '#FFB020' } else { '#FFFFFF' })
+    }
+    elseif ($session -and $session.game) {
+        $Row.Session.Text = [string]$session.game
+        $Row.Session.Foreground = New-Brush '#B4B8BC'
+    }
+    else {
+        $Row.Session.Text = $(if ($session) { 'нет сеанса' } else { '—' })
+        $Row.Session.Foreground = New-Brush '#7C8085'
+    }
+    $Row.Session.ToolTip = $Row.Session.Text
+
     $Row.Busy = [bool]$data.busy
     $Row.State = [string]$data.state
     $Row.Pending = [string]$data.pending
     $Row.BusyText = [string]$data.busy
     $text = switch ([string]$data.state) {
         'waiting-idle' {
-            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } 'maintain' { 'начнёт обновление игр' } default { 'обновится' } })
+            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } 'shutdown' { 'выключится' } 'maintain' { 'начнёт обновление игр' } default { 'обновится' } })
             $(if ($data.busy) { "$verb после сеанса ($($data.busy))" } else { "$verb через несколько секунд" })
         }
         'updating' { 'обновляется' }
         'rebooting' { 'перезагружается' }
+        'shutdown' { 'выключается' }
         'maintenance' { $(if ($data.maintain) { "обновление игр: $($data.maintain)" } else { 'обновление игр' }) }
         'await-decision' { 'ждёт ответа на экране' }
         default { $(if ($data.busy) { [string]$data.busy } else { 'свободен' }) }
@@ -317,7 +360,7 @@ function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scrip
     $ps = [powershell]::Create()
     [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $false }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
     return $true
 }
 
@@ -325,7 +368,7 @@ function Update-Query {
     if (-not $script:Running -or -not $script:Running.Async.IsCompleted) { return }
     $job = $script:Running
     $script:Running = $null
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot) { $button.IsEnabled = $true }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $true }
     $output = $null
     try { $output = @($job.Ps.EndInvoke($job.Async))[0] } catch { $TxtStatus.Text = "Ошибка опроса: $_" }
     $job.Ps.Dispose()
@@ -349,6 +392,7 @@ $script:Commands = @{
     lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
     unlock = @{ Verb = 'РАЗБЛОКИРОВАТЬ'; Now = 'Разблокировать их сразу'; Note = 'Защита UWF выключится, компьютеры перезагрузятся. Пока защита выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать их обратно.'; Done = 'разблокируются' }
     maintain = @{ Verb = 'Обновить игры на'; Now = 'Начать обновление игр сразу'; Note = 'Защита выключится, кокпит перезагрузится и запустит Steam. Когда загрузки закончатся, защита включится обратно, кокпит перезагрузится. Обслуживание длится от 6 минут до 2 часов. Закончить раньше: кнопка «Заблокировать». Запуск игр на это время закрыт.'; Done = 'начнут обновление' }
+    shutdown = @{ Verb = 'Выключить'; Now = 'Выключить их сразу'; Note = 'Компьютеры выключатся. Включить их обратно можно только кнопкой на корпусе.'; Done = 'выключатся' }
     reboot = @{ Verb = 'Перезагрузить'; Now = 'Перезагрузить их сразу'; Note = 'Компьютеры перезагрузятся.'; Done = 'перезагрузятся' }
 }
 
@@ -408,10 +452,127 @@ function Start-RemoteCommand([string]$Action) {
     if (-not $started) { $TxtStatus.Text = 'Дождись окончания опроса и нажми ещё раз.' }
 }
 
+# ---------- Громкость отдельного кокпита ----------
+
+$script:VolumePopup = $null
+
+function New-VolumeSlider([System.Windows.Controls.Panel]$Panel, [string]$Title, $Value) {
+    $head = New-Object System.Windows.Controls.DockPanel
+    $head.Margin = New-Object System.Windows.Thickness(0, 10, 0, 2)
+    $label = New-Object System.Windows.Controls.TextBlock
+    $label.Text = $Title
+    $label.Foreground = New-Brush '#C9CCD0'
+    $number = New-Object System.Windows.Controls.TextBlock
+    $number.Foreground = New-Brush '#FFFFFF'
+    $number.FontWeight = [System.Windows.FontWeights]::SemiBold
+    [System.Windows.Controls.DockPanel]::SetDock($number, 'Right')
+    [void]$head.Children.Add($number)
+    [void]$head.Children.Add($label)
+    $slider = New-Object System.Windows.Controls.Slider
+    $slider.Minimum = 0
+    $slider.Maximum = 100
+    $slider.SmallChange = 1
+    $slider.LargeChange = 10
+    $slider.IsSnapToTickEnabled = $true
+    $slider.TickFrequency = 1
+    # Пусто: программа не звучит и громкость ещё не выбирали. Ползунок стоит на 100, применится при изменении.
+    $known = $null -ne $Value -and "$Value" -ne ''
+    $slider.Value = $(if ($known) { [int]$Value } else { 100 })
+    $slider.Tag = $known
+    $number.Text = $(if ($known) { "$([int]$slider.Value)%" } else { 'не звучит' })
+    $slider.Add_ValueChanged({ param($sender) $sender.Tag = $true; $sender.DataContext.Text = "$([int]$sender.Value)%" })
+    $slider.DataContext = $number
+    [void]$Panel.Children.Add($head)
+    [void]$Panel.Children.Add($slider)
+    return $slider
+}
+
+function Show-VolumePopup($Row, $Anchor) {
+    if (-not $Row -or -not $Row.Volumes) { return }
+    if ($env:COMPUTERNAME -ne 'SIMRACE-14') {
+        $TxtStatus.Text = 'Громкость кокпитов меняется только с SIMRACE-14.'
+        return
+    }
+    if ($script:VolumePopup) { $script:VolumePopup.IsOpen = $false }
+    $volumes = $Row.Volumes
+    $panel = New-Object System.Windows.Controls.StackPanel
+    $title = New-Object System.Windows.Controls.TextBlock
+    $title.Text = "Громкость · $($Row.Name)"
+    $title.FontSize = 17
+    $title.FontWeight = [System.Windows.FontWeights]::SemiBold
+    $title.Foreground = New-Brush '#FFFFFF'
+    [void]$panel.Children.Add($title)
+    $system = New-VolumeSlider $panel 'Система' $volumes.system
+    $game = New-VolumeSlider $panel 'Игра' $volumes.gameVolume
+    $mumble = New-VolumeSlider $panel 'Mumble' $volumes.mumble
+    $note = New-Object System.Windows.Controls.TextBlock
+    $note.Text = 'Если игра или Mumble сейчас молчат, громкость применится, когда они зазвучат.'
+    $note.TextWrapping = 'Wrap'
+    $note.FontSize = 13
+    $note.Foreground = New-Brush '#7C8085'
+    $note.Margin = New-Object System.Windows.Thickness(0, 12, 0, 12)
+    [void]$panel.Children.Add($note)
+    $buttons = New-Object System.Windows.Controls.UniformGrid
+    $buttons.Rows = 1
+    $buttons.Margin = New-Object System.Windows.Thickness(0, 0, -10, 0)
+    $apply = New-Object System.Windows.Controls.Button
+    $apply.Content = 'Применить'
+    $apply.Style = $Window.FindResource('Primary')
+    $cancel = New-Object System.Windows.Controls.Button
+    $cancel.Content = 'Отмена'
+    $cancel.Style = $Window.FindResource('Btn')
+    [void]$buttons.Children.Add($apply)
+    [void]$buttons.Children.Add($cancel)
+    [void]$panel.Children.Add($buttons)
+    $box = New-Object System.Windows.Controls.Border
+    $box.Background = New-Brush '#F2141518'
+    $box.BorderBrush = New-Brush '#3A3D42'
+    $box.BorderThickness = New-Object System.Windows.Thickness(1)
+    $box.CornerRadius = New-Object System.Windows.CornerRadius(14)
+    $box.Padding = New-Object System.Windows.Thickness(20, 16, 20, 18)
+    $box.Width = 330
+    $box.Child = $panel
+    $popup = New-Object System.Windows.Controls.Primitives.Popup
+    $popup.Child = $box
+    $popup.PlacementTarget = $Anchor
+    $popup.Placement = 'Bottom'
+    $popup.HorizontalOffset = -270
+    $popup.StaysOpen = $false
+    $popup.AllowsTransparency = $true
+    $script:VolumePopup = $popup
+    $cancel.Add_Click({ $script:VolumePopup.IsOpen = $false })
+    $apply.Tag = @{ Name = $Row.Name; System = $system; Game = $game; Mumble = $mumble }
+    $apply.Add_Click({
+        param($sender)
+        $data = $sender.Tag
+        # Отправляем только те громкости, которые известны или были изменены
+        $command = [ordered]@{ action = 'volume' }
+        foreach ($pair in @(@('system', $data.System), @('game', $data.Game), @('mumble', $data.Mumble))) {
+            if ($pair[1].Tag) { $command[$pair[0]] = [int]$pair[1].Value }
+        }
+        $name = $data.Name
+        $started = Start-Query @($name) ($command | ConvertTo-Json -Compress) $false {
+            param($Output)
+            # Блок выполняется позже, после опроса: имя берём из результата, а не из переменной
+            $name = @($Output.Results.Keys)[0]
+            $answer = $Output.Results[$name]
+            $result = $null
+            if ($answer) { try { $result = $answer | ConvertFrom-Json } catch { } }
+            $TxtStatus.Text = $(if ($result -and $result.ok) { "Громкость на $name изменена." } elseif ($result) { "$name`: $($result.error)" } else { "$name не ответил." })
+            $script:StatusHold = (Get-Date).AddSeconds(15)
+            $script:NextRefresh = (Get-Date).AddSeconds(3)
+        }
+        if ($started) { $script:VolumePopup.IsOpen = $false }
+        else { $TxtStatus.Text = 'Дождись окончания опроса и нажми ещё раз.' }
+    })
+    $popup.IsOpen = $true
+}
+
 $BtnRefresh.Add_Click({ Start-Refresh })
 $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
 $BtnMaintain.Add_Click({ Start-RemoteCommand 'maintain' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
+$BtnShutdown.Add_Click({ Start-RemoteCommand 'shutdown' })
 $BtnUnlock.Add_Click({ Start-RemoteCommand 'unlock' })
 $BtnReboot.Add_Click({ Start-RemoteCommand 'reboot' })
 $BtnSelectAll.Add_Click({ foreach ($row in $script:RowMap.Values) { if ($row.Online) { $row.Check.IsChecked = $true } } })

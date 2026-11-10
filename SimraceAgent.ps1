@@ -28,7 +28,9 @@ $script:LauncherSeen = [datetime]::MinValue
 $script:IdleNext = [datetime]::MinValue
 $script:ForceUpdate = $false
 $script:WaitAction = 'update'
-$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка'; maintain = 'Обслуживание' }
+$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка'; shutdown = 'Выключение'; maintain = 'Обслуживание' }
+$script:LauncherReport = $null      # последний отчёт лаунчера: игра, сеанс, громкость
+$script:VolumeCmd = $null           # громкость с SIMRACE-14: лаунчер заберёт её при следующем опросе
 $script:MaintainStart = [datetime]::MinValue
 $script:MaintainNext = [datetime]::MinValue
 $script:MaintainQuiet = 0
@@ -408,6 +410,12 @@ function Update-WaitingUpdate {
         Restart-Pc
         return
     }
+    if ($script:WaitAction -eq 'shutdown') {
+        $script:State = 'shutdown'
+        Write-Log 'Выключение'
+        [void](Start-Process -FilePath 'shutdown.exe' -ArgumentList '/s /t 3 /f' -WindowStyle Hidden)
+        return
+    }
     if ($script:WaitAction -eq 'maintain') {
         $filter = Get-UwfFilter
         if (-not $filter -or -not $filter.CurrentEnabled) {
@@ -605,7 +613,8 @@ function Update-Maintenance {
 }
 
 # Подключения из локальной сети: состояние и обновление от любого компьютера клуба, без пароля.
-# Обновление ставит официальную версию с GitHub. Блокировка, разблокировка, перезагрузка и обслуживание принимаются только с SIMRACE-14.
+# Обновление ставит официальную версию с GitHub. Блокировка, разблокировка, перезагрузка, выключение,
+# обслуживание и громкость принимаются только с SIMRACE-14.
 # Все три команды ждут, пока на кокпите закончится сеанс, если администратор не попросил не ждать.
 function Update-Network {
     if (-not $script:Listener) { return }
@@ -633,6 +642,20 @@ function Update-Network {
 # Блокировку и перезагрузку принимаем только с администраторского компьютера SIMRACE-14.
 # У SIMRACE-14 может быть несколько адресов (локальная сеть, Radmin VPN), поэтому проверяем двумя способами:
 # адреса по имени SIMRACE-14 и имя компьютера по адресу, с которого пришла команда.
+# Что сейчас на кокпите по словам лаунчера: игра, начало сеанса, длительность, громкость
+function Get-SessionReport {
+    $report = $script:LauncherReport
+    if (-not $report -or ((Get-Date) - $script:LauncherSeen).TotalSeconds -ge 15) { return $null }
+    $elapsed = [double]$report.elapsed
+    # Отчёт приходит раз в 2 секунды: добавляем время с его прихода, если сеанс не на паузе
+    if ($report.session -and -not $report.paused) { $elapsed += ((Get-Date) - $script:LauncherSeen).TotalSeconds }
+    return @{
+        active = [bool]$report.session; paused = [bool]$report.paused; game = [string]$report.game
+        start = [string]$report.start; elapsed = [int]$elapsed
+        system = $report.volSystem; gameVolume = $report.volGame; mumble = $report.volMumble
+    }
+}
+
 function Test-AdminSource([System.Net.IPAddress]$Remote) {
     if (-not $Remote) { return $false }
     if ($Remote.IsIPv4MappedToIPv6) { $Remote = $Remote.MapToIPv4() }
@@ -668,15 +691,31 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
                 usedMb = $data.usedMb; freeMb = $data.freeMb; pages = @($data.pages); busy = Get-BusyReason
                 pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
                 maintain = $(if ($script:State -eq 'maintenance') { $script:MaintainText } else { '' })
+                session = Get-SessionReport
             }
         }
-        { $_ -eq 'lock' -or $_ -eq 'unlock' -or $_ -eq 'reboot' -or $_ -eq 'maintain' } {
+        'volume' {
+            if (-not (Test-AdminSource $Remote)) {
+                Write-Log "Отказано: громкость с $Remote, а не с $($script:AdminComputer)"
+                return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
+            }
+            # Значение от 0 до 100 или пусто: эту громкость не меняем
+            $levels = @{}
+            foreach ($name in 'system', 'game', 'mumble') {
+                $value = $Request.$name
+                if ($null -ne $value -and "$value" -ne '') { $levels[$name] = [math]::Max(0, [math]::Min(100, [int]$value)) }
+            }
+            $script:VolumeCmd = @{ id = [guid]::NewGuid().ToString('N'); system = $levels['system']; game = $levels['game']; mumble = $levels['mumble'] }
+            Write-Log "Громкость с $Remote`: система $($levels['system']), игра $($levels['game']), Mumble $($levels['mumble'])"
+            return @{ ok = $true }
+        }
+        { $_ -eq 'lock' -or $_ -eq 'unlock' -or $_ -eq 'reboot' -or $_ -eq 'shutdown' -or $_ -eq 'maintain' } {
             $action = [string]$Request.action
             if (-not (Test-AdminSource $Remote)) {
                 Write-Log "Отказано: команда «$action» пришла с $Remote, а не с $($script:AdminComputer)"
                 return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
             }
-            if ($action -ne 'reboot' -and -not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере нет.' } }
+            if ($action -ne 'reboot' -and $action -ne 'shutdown' -and -not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере нет.' } }
             # Во время обслуживания: «Заблокировать» заканчивает его сразу, «Перезагрузить» перезагружает без защиты
             if ($script:State -eq 'maintenance') {
                 if ($action -eq 'lock') {
@@ -751,9 +790,12 @@ function Invoke-Request($Request) {
             if ($Request.PSObject.Properties['session']) {
                 $script:LauncherBusy = [bool]$Request.session
                 $script:LauncherSeen = Get-Date
+                $script:LauncherReport = $Request
             }
+            # Лаунчер применил громкость: больше её не передаём
+            if ($script:VolumeCmd -and [string]$Request.volAck -eq $script:VolumeCmd.id) { $script:VolumeCmd = $null }
             $filter = Get-UwfFilter
-            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; maintain = $script:MaintainText }
+            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; maintain = $script:MaintainText; volume = $script:VolumeCmd }
         }
         'overlay' { return $script:OverlayData }
         'auth' {
