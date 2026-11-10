@@ -13,7 +13,7 @@ $script:VersionUrl = 'https://raw.githubusercontent.com/velizhaninv/simrace_laun
 
 # Опрос в фоне: подключается ко всем кокпитам сразу, ждёт не дольше 2,5 секунды
 $script:QueryScript = {
-    param($Names, $Port, $Line, $VersionUrl, $Lines)
+    param($Names, $Port, $Line, $VersionUrl, $Lines, $ReadTimeout)
     $encoding = New-Object System.Text.UTF8Encoding($false)
     $items = foreach ($name in $Names) {
         $client = New-Object System.Net.Sockets.TcpClient
@@ -33,7 +33,7 @@ $script:QueryScript = {
         if ($item.Task -and $item.Task.Status -eq 'RanToCompletion' -and $item.Client.Connected) {
             try {
                 $stream = $item.Client.GetStream()
-                $stream.ReadTimeout = 4000
+                $stream.ReadTimeout = $(if ($ReadTimeout) { [int]$ReadTimeout } else { 4000 })
                 $stream.WriteTimeout = 3000
                 $writer = New-Object System.IO.StreamWriter($stream, $encoding, 4096, $true)
                 $writer.AutoFlush = $true
@@ -131,6 +131,9 @@ $script:QueryScript = {
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
       <Button x:Name="BtnRefresh" DockPanel.Dock="Right" Content="↻  Обновить список" Style="{StaticResource Link}" Margin="0"/>
       <Button x:Name="BtnStats" DockPanel.Dock="Right" Content="Статистика сеансов" Style="{StaticResource Link}" Margin="0,0,6,0"/>
+      <Button x:Name="BtnAcRestore" DockPanel.Dock="Right" Content="AC: откатить" Style="{StaticResource Link}" Margin="0,0,6,0" ToolTip="Вернуть настройки AC, которые были до последнего применения эталона"/>
+      <Button x:Name="BtnAcApply" DockPanel.Dock="Right" Content="AC: применить эталон" Style="{StaticResource Link}"/>
+      <Button x:Name="BtnAcCollect" DockPanel.Dock="Right" Content="AC: собрать эталон" Style="{StaticResource Link}" ToolTip="Собрать настройки Assetto Corsa с одного отмеченного кокпита"/>
       <TextBlock x:Name="TxtLatest" DockPanel.Dock="Right" FontSize="14" Foreground="#7C8085" VerticalAlignment="Center" Margin="0,0,14,0"/>
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <TextBlock Text="Выбрать:" Foreground="#7C8085" FontSize="15" VerticalAlignment="Center" Margin="2,0,6,0"/>
@@ -165,7 +168,7 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMaintain', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnAcCollect', 'BtnAcApply', 'BtnAcRestore', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
@@ -502,7 +505,7 @@ function Show-Result($Row, $Answer, [string]$Latest) {
     $Row.BusyText = [string]$data.busy
     $text = switch ([string]$data.state) {
         'waiting-idle' {
-            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } 'shutdown' { 'выключится' } 'maintain' { 'начнёт обновление игр' } default { 'обновится' } })
+            $verb = $(switch ([string]$data.pending) { 'lock' { 'заблокируется' } 'unlock' { 'разблокируется' } 'reboot' { 'перезагрузится' } 'shutdown' { 'выключится' } 'acapply' { 'применит настройки AC' } 'acrestore' { 'откатит настройки AC' } 'maintain' { 'начнёт обновление игр' } default { 'обновится' } })
             $(if ($data.busy) { "$verb после сеанса ($($data.busy))" } else { "$verb через несколько секунд" })
         }
         'updating' { 'обновляется' }
@@ -528,10 +531,10 @@ function Show-Result($Row, $Answer, [string]$Latest) {
 $script:Running = $null
 $script:Latest = ''
 
-function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scriptblock]$Done, [hashtable]$Lines = @{}) {
+function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scriptblock]$Done, [hashtable]$Lines = @{}, [int]$ReadTimeout = 4000) {
     if ($script:Running) { return $false }
     $ps = [powershell]::Create()
-    [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
+    [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines).AddArgument($ReadTimeout)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
     foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMaintain, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
     return $true
@@ -565,11 +568,13 @@ $script:Commands = @{
     lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
     unlock = @{ Verb = 'РАЗБЛОКИРОВАТЬ'; Now = 'Разблокировать их сразу'; Note = 'Защита UWF выключится, компьютеры перезагрузятся. Пока защита выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать их обратно.'; Done = 'разблокируются' }
     maintain = @{ Verb = 'Обновить игры на'; Now = 'Начать обновление игр сразу'; Note = 'Защита выключится, кокпит перезагрузится и запустит Steam. Когда загрузки закончатся, защита включится обратно, кокпит перезагрузится. Обслуживание длится от 6 минут до 2 часов. Закончить раньше: кнопка «Заблокировать». Запуск игр на это время закрыт.'; Done = 'начнут обновление' }
+    acapply = @{ Verb = 'Применить эталон настроек AC на'; Now = 'Применить сразу'; Note = 'Если защита включена, кокпит разблокируется, применит настройки и заблокируется обратно, с двумя перезагрузками. Бинды руля, педалей и разрешение экрана останутся свои. FFB отдельных машин сбросится к стоку. Перед применением делается резервная копия.'; Done = 'применят настройки' }
+    acrestore = @{ Verb = 'Откатить последнее применение настроек AC на'; Now = 'Откатить сразу'; Note = 'Вернётся резервная копия, сделанная перед последним применением эталона. Если защита включена, кокпит разблокируется и заблокируется обратно.'; Done = 'откатят настройки' }
     shutdown = @{ Verb = 'Выключить'; Now = 'Выключить их сразу'; Note = 'Компьютеры выключатся. Включить их обратно можно только кнопкой на корпусе.'; Done = 'выключатся' }
     reboot = @{ Verb = 'Перезагрузить'; Now = 'Перезагрузить их сразу'; Note = 'Компьютеры перезагрузятся.'; Done = 'перезагрузятся' }
 }
 
-function Start-RemoteCommand([string]$Action) {
+function Start-RemoteCommand([string]$Action, [hashtable]$Extra = @{}) {
     $text = $script:Commands[$Action]
     $selected = @($script:Names | Where-Object { $script:RowMap[$_].Check.IsChecked })
     if ($selected.Count -eq 0) {
@@ -581,8 +586,11 @@ function Start-RemoteCommand([string]$Action) {
         return
     }
     $lines = @{}
-    $line = "{`"action`":`"$Action`"}"
-    $forceLine = "{`"action`":`"$Action`",`"force`":true}"
+    $payload = [ordered]@{ action = $Action }
+    foreach ($key in $Extra.Keys) { $payload[$key] = $Extra[$key] }
+    $line = $payload | ConvertTo-Json -Compress
+    $payload.force = $true
+    $forceLine = $payload | ConvertTo-Json -Compress
     # Кокпит уже ждёт конца сеанса с этой же командой: можно выполнить сразу
     $waiting = @($selected | Where-Object { $script:RowMap[$_].State -eq 'waiting-idle' -and $script:RowMap[$_].Pending -eq $Action })
     if ($waiting.Count -gt 0) {
@@ -621,8 +629,72 @@ function Start-RemoteCommand([string]$Action) {
         $script:StatusHold = (Get-Date).AddSeconds(30)
         foreach ($name in $Output.Results.Keys) { $script:RowMap[$name].Check.IsChecked = $false }
         $script:NextRefresh = (Get-Date).AddSeconds(3)
-    } $lines
+    } $lines 30000
     if (-not $started) { $TxtStatus.Text = 'Дождись окончания опроса и нажми ещё раз.' }
+}
+
+# ---------- Эталонные настройки Assetto Corsa ----------
+# Эталон хранится на SIMRACE-14: собирается с одного кокпита, раздаётся на выбранные
+
+$script:AcFolder = $(if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\AC-Reference' } else { Join-Path $env:ProgramData 'SIMRACE\AC-Reference' })
+$script:AcZip = Join-Path $script:AcFolder 'reference.zip'
+$script:AcInfo = Join-Path $script:AcFolder 'reference.txt'
+
+function Get-AcReferenceText {
+    if (-not (Test-Path -LiteralPath $script:AcZip)) { return '' }
+    $info = $(try { (Get-Content -LiteralPath $script:AcInfo -Encoding UTF8 -TotalCount 1) } catch { '' })
+    return $(if ($info) { $info } else { 'эталон от ' + (Get-Item -LiteralPath $script:AcZip).LastWriteTime.ToString('dd.MM HH:mm') })
+}
+
+function Start-AcCollect {
+    $selected = @($script:Names | Where-Object { $script:RowMap[$_].Check.IsChecked })
+    if ($selected.Count -ne 1 -or -not $script:RowMap[$selected[0]].Online) {
+        $TxtStatus.Text = 'Отметь один кокпит на связи: с него соберётся эталон настроек AC.'
+        return
+    }
+    $name = $selected[0]
+    $question = "Собрать эталон настроек Assetto Corsa с $name?`n`nНа нём должны быть закрыты Assetto Corsa и Content Manager, сеанс завершён. Переносятся HUD, CSP, графика, звук, FFB и клавиши. Бинды руля, педалей и разрешение экрана останутся свои на каждом ПК."
+    if (Test-Path -LiteralPath $script:AcZip) { $question += "`n`nТекущий эталон ($(Get-AcReferenceText)) будет заменён." }
+    if ([System.Windows.MessageBox]::Show($Window, $question, 'Эталон AC', 'YesNo', 'Question') -ne 'Yes') { return }
+    $TxtStatus.Text = "Собираю эталон с $name..."
+    $script:StatusHold = (Get-Date).AddSeconds(120)
+    $started = Start-Query @($name) '{"action":"ac-collect"}' $false {
+        param($Output)
+        $name = @($Output.Results.Keys)[0]
+        $answer = $Output.Results[$name]
+        $data = $null
+        if ($answer) { try { $data = $answer | ConvertFrom-Json } catch { } }
+        if (-not $data -or -not $data.ok) {
+            $TxtStatus.Text = "Эталон не собран: $(if ($data) { $data.error } else { "$name не ответил" })"
+        }
+        else {
+            if (-not (Test-Path -LiteralPath $script:AcFolder)) { New-Item -ItemType Directory -Path $script:AcFolder -Force | Out-Null }
+            [System.IO.File]::WriteAllBytes($script:AcZip, [Convert]::FromBase64String([string]$data.zip))
+            Set-Content -LiteralPath $script:AcInfo -Value "эталон с $name от $((Get-Date).ToString('dd.MM HH:mm'))" -Encoding UTF8
+            $report = Join-Path $script:AcFolder 'report.txt'
+            Set-Content -LiteralPath $report -Value ([string]$data.report) -Encoding UTF8
+            $TxtStatus.Text = "Эталон собран с $name. Отчёт: $report"
+        }
+        $script:StatusHold = (Get-Date).AddSeconds(60)
+        Update-AcButtons
+    } @{} 120000
+    if (-not $started) { $TxtStatus.Text = 'Дождись окончания опроса и нажми ещё раз.' }
+}
+
+function Start-AcApply {
+    if (-not (Test-Path -LiteralPath $script:AcZip)) {
+        $TxtStatus.Text = 'Эталона ещё нет: отметь настроенный кокпит и нажми «AC: собрать эталон».'
+        return
+    }
+    $zip = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($script:AcZip))
+    Start-RemoteCommand 'acapply' @{ zip = $zip }
+}
+
+function Update-AcButtons {
+    $text = Get-AcReferenceText
+    $BtnAcApply.ToolTip = $(if ($text) { "Применить $text на отмеченные кокпиты" } else { 'Эталона ещё нет' })
+    $BtnAcApply.IsEnabled = [bool]$text
+    $BtnAcRestore.IsEnabled = $true
 }
 
 # ---------- Громкость отдельного кокпита ----------
@@ -746,6 +818,10 @@ $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
 $BtnMaintain.Add_Click({ Start-RemoteCommand 'maintain' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
 $BtnWake.Add_Click({ Start-Wake })
+$BtnAcCollect.Add_Click({ Start-AcCollect })
+$BtnAcApply.Add_Click({ Start-AcApply })
+$BtnAcRestore.Add_Click({ Start-RemoteCommand 'acrestore' })
+Update-AcButtons
 $BtnStats.Add_Click({
     $file = Join-Path $PSScriptRoot 'Stats.ps1'
     Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', "`"$file`"")

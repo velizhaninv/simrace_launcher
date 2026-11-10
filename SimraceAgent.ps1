@@ -28,7 +28,7 @@ $script:LauncherSeen = [datetime]::MinValue
 $script:IdleNext = [datetime]::MinValue
 $script:ForceUpdate = $false
 $script:WaitAction = 'update'
-$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка'; shutdown = 'Выключение'; maintain = 'Обслуживание' }
+$script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка'; shutdown = 'Выключение'; maintain = 'Обслуживание'; acapply = 'Настройки AC'; acrestore = 'Откат настроек AC' }
 $script:LauncherReport = $null      # последний отчёт лаунчера: игра, сеанс, громкость
 $script:VolumeCmd = $null           # громкость с SIMRACE-14: лаунчер заберёт её при следующем опросе
 $script:MaintainStart = [datetime]::MinValue
@@ -436,6 +436,28 @@ function Update-WaitingUpdate {
         Restart-Pc
         return
     }
+    if ($script:WaitAction -eq 'acapply' -or $script:WaitAction -eq 'acrestore') {
+        $mode = $(if ($script:WaitAction -eq 'acapply') { 'Apply' } else { 'Restore' })
+        $filter = Get-UwfFilter
+        if ($filter -and $filter.CurrentEnabled) {
+            # Защита включена: выключаем, применяем после перезагрузки и включаем обратно
+            Set-Pending "ac-$mode"
+            try { Set-Uwf $false }
+            catch {
+                Set-Pending ''
+                $script:State = 'idle'
+                $script:UpdateOk = $false
+                $script:Message = "Настройки AC не применены: $($_.Exception.Message)"
+                Write-Log $script:Message
+                return
+            }
+            $script:State = 'rebooting'
+            Restart-Pc
+            return
+        }
+        Invoke-AcSettings $mode $false
+        return
+    }
     if ($script:WaitAction -eq 'unlock') {
         try {
             $filter = Get-UwfFilter
@@ -657,6 +679,83 @@ function Get-SessionReport {
     }
 }
 
+# ---------- Эталонные настройки Assetto Corsa ----------
+# Сбор и применение делает AC-Settings.ps1. Служба запускает его без вопросов и передаёт эталон через SIMRACE-14.
+
+function Get-AcFolder {
+    $folder = $(if (Test-Path -LiteralPath 'Z:\') { 'Z:\SIMRACE\AC-Settings' } else { Join-Path $env:ProgramData 'SIMRACE\AC-Settings' })
+    if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+    return $folder
+}
+
+# Запуск AC-Settings.ps1. Возвращает код и последние строки отчёта.
+function Invoke-AcScript([string]$Mode, [string]$Package) {
+    $folder = Get-AcFolder
+    $log = Join-Path $folder "$Mode.log"
+    if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $script:Root 'AC-Settings.ps1')`"", '-Mode', $Mode, '-NonInteractive',
+        '-BackupRoot', "`"$(Join-Path $folder 'Backups')`"", '-OutFile', "`"$log`"")
+    if ($Package) { $arguments += @('-PackagePath', "`"$Package`"") }
+    $process = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+    $tail = $(if (Test-Path -LiteralPath $log) { (Get-Content -LiteralPath $log -Encoding UTF8 -Tail 6) -join ' ' } else { '' })
+    return @{ Code = $process.ExitCode; Tail = $tail }
+}
+
+function Invoke-AcCollect {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $folder = Get-AcFolder
+    $package = Join-Path $folder 'collected'
+    $zip = Join-Path $folder 'collected.zip'
+    foreach ($path in $package, $zip) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force } }
+    $result = Invoke-AcScript 'Collect' $package
+    if ($result.Code -ne 0 -or -not (Test-Path -LiteralPath $package)) {
+        Write-Log "Сбор эталона AC не удался: $($result.Tail)"
+        return @{ ok = $false; error = "Сбор не удался: $($result.Tail)" }
+    }
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($package, $zip)
+    $report = Join-Path $package 'report.txt'
+    Write-Log "Эталон AC собран: $([math]::Round((Get-Item -LiteralPath $zip).Length / 1KB)) КБ"
+    return @{
+        ok = $true; computer = $env:COMPUTERNAME
+        zip = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($zip))
+        report = $(if (Test-Path -LiteralPath $report) { [System.IO.File]::ReadAllText($report) } else { '' })
+    }
+}
+
+# Применение или откат. $Relock: после этого включить защиту и перезагрузиться.
+function Invoke-AcSettings([string]$Mode, [bool]$Relock) {
+    $script:State = 'updating'
+    $title = $(if ($Mode -eq 'Apply') { 'Настройки AC' } else { 'Откат настроек AC' })
+    try {
+        $package = $null
+        if ($Mode -eq 'Apply') {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $folder = Get-AcFolder
+            $package = Join-Path $folder 'package'
+            if (Test-Path -LiteralPath $package) { Remove-Item -LiteralPath $package -Recurse -Force }
+            [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $folder 'incoming.zip'), $package)
+        }
+        $result = Invoke-AcScript $Mode $package
+        $script:UpdateOk = ($result.Code -eq 0)
+        $script:Message = $(if ($script:UpdateOk) { "$title`: готово" } else { "$title`: ошибка. $($result.Tail)" })
+    }
+    catch {
+        $script:UpdateOk = $false
+        $script:Message = "$title`: ошибка. $($_.Exception.Message)"
+    }
+    Write-Log $script:Message
+    if ($Relock) {
+        try {
+            Set-Uwf $true
+            $script:State = 'rebooting'
+            Restart-Pc
+            return
+        }
+        catch { Write-Log "Защита не включилась после настроек AC: $_" }
+    }
+    $script:State = 'idle'
+}
+
 # ---------- Статистика ----------
 # Файл на незащищённом диске Z: записи переживают перезагрузку при включённой защите
 function Get-StatFile {
@@ -786,11 +885,23 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
             Write-Log "Громкость с $Remote`: система $($levels['system']), игра $($levels['game']), Mumble $($levels['mumble'])"
             return @{ ok = $true }
         }
-        { $_ -eq 'lock' -or $_ -eq 'unlock' -or $_ -eq 'reboot' -or $_ -eq 'shutdown' -or $_ -eq 'maintain' } {
+        'ac-collect' {
+            if (-not (Test-AdminSource $Remote)) { return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." } }
+            if ($script:State -ne 'idle') { return @{ ok = $false; error = "Кокпит занят: $($script:State)" } }
+            if (Get-BusyReason) { return @{ ok = $false; error = 'Идёт сеанс. Заверши его и закрой Assetto Corsa.' } }
+            Write-Log "Сбор эталона AC: команда с $Remote"
+            return (Invoke-AcCollect)
+        }
+        { $_ -eq 'lock' -or $_ -eq 'unlock' -or $_ -eq 'reboot' -or $_ -eq 'shutdown' -or $_ -eq 'maintain' -or $_ -eq 'acapply' -or $_ -eq 'acrestore' } {
             $action = [string]$Request.action
             if (-not (Test-AdminSource $Remote)) {
                 Write-Log "Отказано: команда «$action» пришла с $Remote, а не с $($script:AdminComputer)"
                 return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
+            }
+            # Эталон приходит вместе с командой: сохраняем его до начала ожидания
+            if ($action -eq 'acapply' -and $script:State -eq 'idle') {
+                try { [System.IO.File]::WriteAllBytes((Join-Path (Get-AcFolder) 'incoming.zip'), [Convert]::FromBase64String([string]$Request.zip)) }
+                catch { return @{ ok = $false; error = 'Эталон не получен целиком.' } }
             }
             if ($action -ne 'reboot' -and $action -ne 'shutdown' -and -not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере нет.' } }
             # Во время обслуживания: «Заблокировать» заканчивает его сразу, «Перезагрузить» перезагружает без защиты
@@ -995,6 +1106,16 @@ catch {
 # Продолжаем обновление, начатое до перезагрузки
 try {
     $pending = Get-Pending
+    if ($pending -eq 'ac-Apply' -or $pending -eq 'ac-Restore') {
+        Set-Pending ''
+        $filter = Get-UwfFilter
+        if ($filter -and $filter.CurrentEnabled) {
+            $script:UpdateOk = $false
+            $script:Message = 'Настройки AC не применены: защита UWF не выключилась.'
+            Write-Log $script:Message
+        }
+        else { Invoke-AcSettings ($pending -replace '^ac-', '') $true }
+    }
     if ($pending -eq 'maintain') {
         $filter = Get-UwfFilter
         if ($filter -and $filter.CurrentEnabled) {
