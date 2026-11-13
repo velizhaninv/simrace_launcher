@@ -36,6 +36,7 @@ $oldLink   = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\S
 $winlogon  = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 $toolsRoot = Join-Path $env:ProgramData 'SIMRACE\Tools'
 $toolTarget = Join-Path $toolsRoot 'ACC Server'
+$telemetryTarget = Join-Path $toolsRoot 'ACC Telemetry'
 
 # Настройки только для гостя: отключают диспетчер задач, блокировку, смену пароля и выход из системы.
 $guestPolicies = @(
@@ -180,6 +181,27 @@ function Install-ServerTool($Config) {
 }
 
 # При включённом UWF всё записанное исчезнет после перезагрузки, поэтому останавливаемся
+# Телеметрия ACC: вторая команда на правой кнопке плитки ACC. Программа лежит в репозитории, папка «ACC Telemetry».
+function Install-AccTelemetry($Config) {
+    $source = Join-Path $PSScriptRoot 'ACC Telemetry'
+    $exe = Get-ChildItem -LiteralPath $source -Filter '*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $exe) { return }
+    $acc = @($Config.apps) | Where-Object { $_.id -eq 'acc' } | Select-Object -First 1
+    if (-not $acc) { return }
+    New-Item -ItemType Directory -Path $telemetryTarget -Force | Out-Null
+    # Программа может быть открыта: тогда остаётся прежняя версия, а обновление лаунчера продолжается
+    try { Copy-Item -LiteralPath $exe.FullName -Destination $telemetryTarget -Force }
+    catch { Write-Warning "Телеметрия ACC не обновлена, возможно, она открыта: $($_.Exception.Message)" }
+    Get-ChildItem -LiteralPath $telemetryTarget -File | Unblock-File -ErrorAction SilentlyContinue
+    & icacls.exe $toolsRoot /grant '*S-1-5-32-545:(OI)(CI)M' /T /Q | Out-Null
+    $extra = [pscustomobject]@{ id = 'acc-telemetry'; name = 'Телеметрия'; paths = @("%ProgramData%\SIMRACE\Tools\ACC Telemetry\$($exe.Name)"); watch = @($exe.BaseName) }
+    $acc | Add-Member -NotePropertyName extra2 -NotePropertyValue $extra -Force
+    # Программа может принимать подключения: разрешаем их из локальной сети, гость сам этого сделать не может
+    Remove-NetFirewallRule -Name 'SIMRACE ACC Telemetry' -ErrorAction SilentlyContinue
+    New-NetFirewallRule -Name 'SIMRACE ACC Telemetry' -DisplayName 'SIMRACE: телеметрия ACC' -Direction Inbound -Program (Join-Path $telemetryTarget $exe.Name) -RemoteAddress LocalSubnet -Action Allow -Profile Any | Out-Null
+    Write-Host "Телеметрия ACC установлена: $($exe.Name)"
+}
+
 $uwf = Get-CimInstance -Namespace 'root\standardcimv2\embedded' -ClassName UWF_Filter -ErrorAction SilentlyContinue
 if ($uwf -and $uwf.CurrentEnabled) {
     throw 'UWF включён. Отключи его (uwfmgr filter disable), перезагрузи компьютер и запусти установку снова.'
@@ -199,6 +221,7 @@ if ($Uninstall) {
     if (Test-Path -LiteralPath $statsLink) { Remove-Item -LiteralPath $statsLink -Force }
     Remove-NetFirewallRule -Name $firewallRule -ErrorAction SilentlyContinue
     Remove-NetFirewallRule -Name 'SIMRACE ACC Server' -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -Name 'SIMRACE ACC Telemetry' -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $target)  { Remove-Item -LiteralPath $target -Recurse -Force }
     if (Test-Path -LiteralPath $toolsRoot) { Remove-Item -LiteralPath $toolsRoot -Recurse -Force }
     Set-GuestPolicies $GuestUser $false
@@ -295,6 +318,7 @@ if ($installedAxes -lt [int]$defaults.axesVersion) {
 $config.adminUser = $AdminUser
 $config.guestUser = $GuestUser
 Install-ServerTool $config
+Install-AccTelemetry $config
 
 # Обложка с другим именем не найдётся: файл должен называться как id игры
 $imagesSource = Join-Path $PSScriptRoot 'images'

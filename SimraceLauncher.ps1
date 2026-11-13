@@ -1017,11 +1017,17 @@ function Find-Cover($App) {
 function Resolve-App($App) {
     if ($App.enabled -eq $false) { return $null }
     $watch = @($App.watch | Where-Object { $_ })
-    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; Info = [string]$App.info; Wheels = @($App.wheels | Where-Object { $_ }); LaunchTimeout = $App.launchTimeoutSeconds; Extra = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
+    $common = @{ Id = $App.id; Name = $App.name; Account = Get-AppAccount $App.id; Cover = Find-Cover $App; AskAccount = $App.askSteamAccount; ExitGrace = $App.exitGraceSeconds; Info = [string]$App.info; Wheels = @($App.wheels | Where-Object { $_ }); LaunchTimeout = $App.launchTimeoutSeconds; Extra = $null; Extra2 = $null; ForceFullscreen = $App.forceFullscreen; Category = [string]$App.category; HostProcess = @($App.hostProcess | Where-Object { $_ }) }
     if ($App.extra) {
         try { $common.Extra = Resolve-App $App.extra }
         catch { Write-Log "$($App.name): ошибка дополнительной кнопки: $_" }
         if (-not $common.Extra) { Write-Log "$($App.name): не найдена программа для кнопки «$($App.extra.name)»" }
+    }
+    # Вторая команда правой кнопки, например телеметрия ACC
+    if ($App.extra2) {
+        try { $common.Extra2 = Resolve-App $App.extra2 }
+        catch { Write-Log "$($App.name): ошибка второй дополнительной команды: $_" }
+        if (-not $common.Extra2) { Write-Log "$($App.name): не найдена программа для команды «$($App.extra2.name)»" }
     }
 
     $shortcut = Find-AppShortcut $App
@@ -2645,7 +2651,8 @@ function New-Tile($App) {
         $script:LastTile = $sender
         $TxtSelected.Text = $sender.Tag.Name
         $TxtHint.Text = 'Нажми, чтобы запустить'
-        if ($sender.Tag.Extra) { $TxtHint.Text += ". Правая кнопка мыши: $($sender.Tag.Extra.Name)" }
+        $extras = @(Get-TileExtras $sender.Tag)
+        if ($extras.Count -gt 0) { $TxtHint.Text += ". Правая кнопка мыши: " + ((@($extras | ForEach-Object { $_.Name.ToLower() })) -join ', ') }
         $script:ForegroundBeforeClick = [SimraceNative]::CurrentForeground()
     }
     $button.Add_MouseEnter($select)
@@ -2659,18 +2666,71 @@ function New-Tile($App) {
     $item = New-Object System.Windows.Controls.StackPanel
     [void]$item.Children.Add($button)
     # Правая кнопка мыши: дополнительное действие плитки, например запуск сервера
-    if ($App.Extra) {
-        # Подсказка при наведении, чтобы гость знал о второй функции плитки
-        $button.ToolTip = "Правая кнопка мыши: $($App.Extra.Name.ToLower())"
+    $extras = @(Get-TileExtras $App)
+    if ($extras.Count -gt 0) {
+        # Подсказка при наведении, чтобы гость знал о дополнительных командах плитки
+        $button.ToolTip = "Правая кнопка мыши: " + ((@($extras | ForEach-Object { $_.Name.ToLower() })) -join ', ')
         [System.Windows.Controls.ToolTipService]::SetInitialShowDelay($button, 500)
         [System.Windows.Controls.ToolTipService]::SetPlacement($button, [System.Windows.Controls.Primitives.PlacementMode]::Mouse)
         $button.Add_MouseRightButtonUp({
             param($sender, $e)
             $e.Handled = $true
-            if (-not $script:Session -and -not $script:Sweeping -and (Test-AccServerReady $sender.Tag.Extra)) { Start-Utility $sender.Tag.Extra }
+            if ($script:Session -or $script:Sweeping) { return }
+            $list = @(Get-TileExtras $sender.Tag)
+            # Одна команда запускается сразу, несколько: меню у курсора
+            if ($list.Count -eq 1) { Start-TileExtra $list[0] }
+            else { Show-ExtraMenu $sender $list }
         })
     }
     return $button
+}
+
+# ---------- Дополнительные команды плитки (правая кнопка) ----------
+
+function Get-TileExtras($App) {
+    return @(@($App.Extra, $App.Extra2) | Where-Object { $_ })
+}
+
+function Start-TileExtra($Extra) {
+    if ($script:Session -or $script:Sweeping) { return }
+    if (Test-AccServerReady $Extra) { Start-Utility $Extra }
+}
+
+# Небольшое меню у курсора в стиле лаунчера: по кнопке на каждую команду
+function Show-ExtraMenu($Anchor, $Extras) {
+    if ($script:ExtraMenu) { $script:ExtraMenu.IsOpen = $false }
+    $panel = New-Object System.Windows.Controls.StackPanel
+    foreach ($extra in $Extras) {
+        $item = New-Object System.Windows.Controls.Button
+        $item.Style = $Window.FindResource('AdminGhost')
+        $item.Content = $extra.Name
+        $item.Tag = $extra
+        $item.HorizontalContentAlignment = 'Left'
+        $item.Margin = New-Object System.Windows.Thickness(0, 0, 0, 6)
+        $item.Add_Click({
+            param($sender, $e)
+            $script:ExtraMenu.IsOpen = $false
+            Start-TileExtra $sender.Tag
+        })
+        [void]$panel.Children.Add($item)
+    }
+    $panel.Margin = New-Object System.Windows.Thickness(0, 0, 0, -6)
+    $box = New-Object System.Windows.Controls.Border
+    $box.Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromArgb(0xF2, 0x14, 0x15, 0x18))
+    $box.BorderBrush = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb(0x3A, 0x3D, 0x42))
+    $box.BorderThickness = New-Object System.Windows.Thickness(1)
+    $box.CornerRadius = New-Object System.Windows.CornerRadius(14)
+    $box.Padding = New-Object System.Windows.Thickness(10)
+    $box.MinWidth = 240
+    $box.Child = $panel
+    $popup = New-Object System.Windows.Controls.Primitives.Popup
+    $popup.Child = $box
+    $popup.PlacementTarget = $Anchor
+    $popup.Placement = 'MousePoint'
+    $popup.StaysOpen = $false
+    $popup.AllowsTransparency = $true
+    $script:ExtraMenu = $popup
+    $popup.IsOpen = $true
 }
 
 # Программа сервера ACC ищет accServer.exe в своей папке. Если его там нет, берём из Steam при каждом запуске:
@@ -5013,9 +5073,9 @@ try {
             if ($app) {
                 [void]$script:Tiles.Add((New-Tile $app))
                 # Программа сервера и подобные окном игры не считаются
-                if ($app.Extra) {
-                    $script:NotGameProcesses += @($app.Extra.Watch | ForEach-Object { ([string]$_).ToLowerInvariant() })
-                    $script:ShellProcesses += @($app.Extra.Watch | ForEach-Object { ([string]$_).ToLowerInvariant() })
+                foreach ($extra in @(Get-TileExtras $app)) {
+                    $script:NotGameProcesses += @($extra.Watch | ForEach-Object { ([string]$_).ToLowerInvariant() })
+                    $script:ShellProcesses += @($extra.Watch | ForEach-Object { ([string]$_).ToLowerInvariant() })
                 }
             }
             else { Write-Log "Скрыта плитка (не найдена на этом ПК или выключена): $($entry.name)" }
