@@ -61,7 +61,7 @@
 <div id="login">
   <form class="card" id="loginForm">
     <h1>Кокпиты SIMRACE</h1>
-    <p>Пароль администратора SIMRACE-14</p>
+    <p>Пароль администратора управляющего компьютера</p>
     <input type="password" id="password" autocomplete="current-password" autofocus>
     <div class="err" id="loginError"></div>
     <button class="btn primary" style="width:100%; margin-top:8px">Войти</button>
@@ -106,8 +106,9 @@
 </div>
 
 <script>
-const NAMES = Array.from({ length: 14 }, (_, i) => 'SIMRACE-' + (i + 1));
-const GROUPS = { 'SIMRACE-1': 'РЯД 1 · КОКПИТЫ 1–8', 'SIMRACE-9': 'РЯД 2 · КОКПИТЫ 9–14' };
+// Список кокпитов и ряды приходят с управляющего компьютера, из настроек клуба
+let NAMES = Array.from({ length: 14 }, (_, i) => 'SIMRACE-' + (i + 1));
+let GROUPS = {};
 const ICONS = {
   internet: 'M11,3 A8,8 0 1 0 11.01,3 Z M3,11 H19 M11,3 C7.5,6.5 7.5,15.5 11,19 M11,3 C14.5,6.5 14.5,15.5 11,19',
   net: 'M3,5 H19 V15 H15 V18.5 H7 V15 H3 Z M7,8.5 V11 M10,8.5 V11 M12,8.5 V11 M15,8.5 V11',
@@ -221,7 +222,14 @@ function render() {
 async function refresh() {
   try {
     const data = await api('/api/state');
-    if (data.ok) { state = data; render(); }
+    if (data.ok) {
+      state = data;
+      if (data.names && data.names.length) NAMES = data.names;
+      GROUPS = {};
+      (data.groups || []).forEach(g => GROUPS['SIMRACE-' + g.from] = g.title);
+      if (data.adminComputer) document.querySelector('#login p').textContent = 'Пароль администратора ' + data.adminComputer;
+      render();
+    }
   } catch (e) { }
 }
 
@@ -336,7 +344,7 @@ $('loginForm').onsubmit = async e => {
     const data = await api('/api/login', { password: $('password').value });
     $('password').value = '';
     if (data.ok) showApp(); else $('loginError').textContent = data.error || 'Не удалось войти';
-  } catch (err) { $('loginError').textContent = 'Нет связи с SIMRACE-14'; }
+  } catch (err) { $('loginError').textContent = 'Нет связи с управляющим компьютером'; }
 };
 
 // Обновление списка каждые 5 секунд, пока не открыто окно громкости

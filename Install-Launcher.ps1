@@ -279,6 +279,14 @@ function Add-MissingProperties($To, $From) {
     }
 }
 $defaults = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+# Клуб задаётся один раз при установке: $env:SIMRACE_CLUB = '2' (филиал). Дальше обновления его не трогают.
+if ($env:SIMRACE_CLUB) {
+    $clubs = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'clubs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $club = $clubs.([string]$env:SIMRACE_CLUB)
+    if (-not $club) { throw "В clubs.json нет клуба $($env:SIMRACE_CLUB)." }
+    if ($config.PSObject.Properties['club']) { $config.club = $club } else { $config | Add-Member -NotePropertyName club -NotePropertyValue $club }
+    Write-Host "Клуб: $($club.name), управляющий компьютер $($club.adminComputer), кокпитов $($club.computers)"
+}
 $installedLayout = [int]$config.layoutVersion
 $installedAxes = [int]$config.axesVersion
 $installedInfo = [int]$config.infoVersion
@@ -397,8 +405,16 @@ if (Test-Path -LiteralPath $accServerExe) {
 Remove-NetFirewallRule -Name $firewallRule -ErrorAction SilentlyContinue
 New-NetFirewallRule -Name $firewallRule -DisplayName 'SIMRACE: обновление лаунчера по сети' -Direction Inbound -Protocol TCP -LocalPort 47615 -RemoteAddress LocalSubnet -Action Allow -Profile Any | Out-Null
 
-# Веб-панель: только на SIMRACE-14, от имени SYSTEM, с загрузки. Открывается в браузере: http://SIMRACE-14:8014
-if ($env:COMPUTERNAME -match '(?i)-14$') {
+# Веб-панель: только на управляющем компьютере клуба, от имени SYSTEM, с загрузки. Адрес: http://<управляющий>:8014
+$clubAdmin = $(if ($config.club -and $config.club.adminComputer) { [string]$config.club.adminComputer } else { 'SIMRACE-14' })
+$isClubAdmin = ($env:COMPUTERNAME -eq $clubAdmin)
+if (-not $isClubAdmin) {
+    # Компьютер перестал быть управляющим: убираем панель и ярлыки
+    Unregister-ScheduledTask -TaskName $webTask -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -Name $webRule -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $fleetLink, $statsLink -Force -ErrorAction SilentlyContinue
+}
+if ($isClubAdmin) {
     $webAction    = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$target\WebPanel.ps1`"" -WorkingDirectory $target
     $webTrigger   = New-ScheduledTaskTrigger -AtStartup
     $webPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -411,8 +427,8 @@ if ($env:COMPUTERNAME -match '(?i)-14$') {
     New-NetFirewallRule -Name $webRule -DisplayName 'SIMRACE: веб-панель кокпитов' -Direction Inbound -Protocol TCP -LocalPort 8014 -RemoteAddress LocalSubnet -Action Allow -Profile Any | Out-Null
 }
 
-# Окно «Кокпиты SIMRACE» нужно только на администраторском компьютере
-if ($env:COMPUTERNAME -match '(?i)-14$') {
+# Окно «Кокпиты SIMRACE» нужно только на управляющем компьютере
+if ($isClubAdmin) {
     $link = (New-Object -ComObject WScript.Shell).CreateShortcut($fleetLink)
     $link.TargetPath = Join-Path $target 'Fleet.cmd'
     $link.WorkingDirectory = $target

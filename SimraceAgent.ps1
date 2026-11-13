@@ -30,8 +30,13 @@ $script:ForceUpdate = $false
 $script:WaitAction = 'update'
 $script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка'; shutdown = 'Выключение' }
 $script:LauncherReport = $null      # последний отчёт лаунчера: игра, сеанс, громкость
-$script:VolumeCmd = $null           # громкость с SIMRACE-14: лаунчер заберёт её при следующем опросе
+$script:VolumeCmd = $null           # громкость с управляющего компьютера: лаунчер заберёт её при следующем опросе
+# Управляющий компьютер клуба берём из настроек (club.adminComputer). В первом клубе это SIMRACE-14, в филиале SIMRACE-1.
 $script:AdminComputer = 'SIMRACE-14'
+try {
+    $clubAdmin = [string](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json).club.adminComputer
+    if ($clubAdmin) { $script:AdminComputer = $clubAdmin }
+} catch { }
 $script:AdminIps = @()
 $script:AdminIpsUntil = [datetime]::MinValue
 $script:RestartSelf = $false
@@ -497,9 +502,9 @@ function Update-Network {
     }
 }
 
-# Блокировку и перезагрузку принимаем только с администраторского компьютера SIMRACE-14.
-# У SIMRACE-14 может быть несколько адресов (локальная сеть, Radmin VPN), поэтому проверяем двумя способами:
-# адреса по имени SIMRACE-14 и имя компьютера по адресу, с которого пришла команда.
+# Блокировку и перезагрузку принимаем только с управляющего компьютера клуба ($script:AdminComputer).
+# У него может быть несколько адресов (локальная сеть, Radmin VPN), поэтому проверяем двумя способами:
+# адреса по имени управляющего компьютера и имя компьютера по адресу, с которого пришла команда.
 # Что сейчас на кокпите по словам лаунчера: игра, начало сеанса, длительность, громкость
 function Get-SessionReport {
     $report = $script:LauncherReport

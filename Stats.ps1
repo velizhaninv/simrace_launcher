@@ -8,7 +8,11 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 $script:Port = 47615
-$script:Names = @(1..14 | ForEach-Object { "SIMRACE-$_" })
+# Настройки клуба из apps.json: управляющий компьютер, число кокпитов, ряды
+$script:Club = $null
+try { $script:Club = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json).club } catch { }
+$script:AdminComputer = $(if ($script:Club -and $script:Club.adminComputer) { [string]$script:Club.adminComputer } else { 'SIMRACE-14' })
+$script:Names = @(1..$(if ($script:Club -and $script:Club.computers) { [int]$script:Club.computers } else { 14 }) | ForEach-Object { "SIMRACE-$_" })
 
 # Опрос в фоне: подключается ко всем кокпитам сразу
 $script:QueryScript = {

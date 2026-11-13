@@ -1,0 +1,25 @@
+{
+  "1": {
+    "name": "Большакова",
+    "adminComputer": "SIMRACE-14",
+    "computers": 14,
+    "groups": [
+      {
+        "from": 1,
+        "to": 8,
+        "title": "РЯД 1 · КОКПИТЫ 1–8"
+      },
+      {
+        "from": 9,
+        "to": 14,
+        "title": "РЯД 2 · КОКПИТЫ 9–14"
+      }
+    ]
+  },
+  "2": {
+    "name": "Чернышевского",
+    "adminComputer": "SIMRACE-1",
+    "computers": 8,
+    "groups": []
+  }
+}

@@ -8,7 +8,11 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 $script:Port = 47615
-$script:Names = @(1..14 | ForEach-Object { "SIMRACE-$_" })
+# Настройки клуба из apps.json: управляющий компьютер, число кокпитов, ряды
+$script:Club = $null
+try { $script:Club = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json).club } catch { }
+$script:AdminComputer = $(if ($script:Club -and $script:Club.adminComputer) { [string]$script:Club.adminComputer } else { 'SIMRACE-14' })
+$script:Names = @(1..$(if ($script:Club -and $script:Club.computers) { [int]$script:Club.computers } else { 14 }) | ForEach-Object { "SIMRACE-$_" })
 $script:VersionUrl = 'https://raw.githubusercontent.com/velizhaninv/simrace_launcher/main/version.txt'
 
 # Опрос в фоне: подключается ко всем кокпитам сразу, ждёт не дольше 2,5 секунды
@@ -223,7 +227,8 @@ $RowsScroll.Add_ScrollChanged({
 # Строки создаются один раз, чтобы выбор не сбрасывался при обновлении списка
 $script:RowMap = @{}
 # Кокпиты стоят в два ряда: 1–8 и 9–14. Перед каждым рядом небольшая подпись и отступ.
-$script:RowGroups = @{ 'SIMRACE-1' = 'РЯД 1 · КОКПИТЫ 1–8'; 'SIMRACE-9' = 'РЯД 2 · КОКПИТЫ 9–14' }
+$script:RowGroups = @{}
+foreach ($group in @($script:Club.groups | Where-Object { $_ })) { $script:RowGroups["SIMRACE-$([int]$group.from)"] = [string]$group.title }
 foreach ($name in $script:Names) {
     if ($script:RowGroups.ContainsKey($name)) {
         $group = New-Object System.Windows.Controls.TextBlock
@@ -231,7 +236,7 @@ foreach ($name in $script:Names) {
         $group.FontSize = 12
         $group.FontWeight = [System.Windows.FontWeights]::SemiBold
         $group.Foreground = New-Brush '#E2450F'
-        $group.Margin = New-Object System.Windows.Thickness(8, $(if ($name -eq 'SIMRACE-1') { 2 } else { 16 }), 0, 4)
+        $group.Margin = New-Object System.Windows.Thickness(8, $(if ($name -eq $script:Names[0]) { 2 } else { 16 }), 0, 4)
         [void]$Rows.Children.Add($group)
     }
     $border = New-Object System.Windows.Controls.Border
@@ -573,8 +578,8 @@ function Start-RemoteCommand([string]$Action) {
         $TxtStatus.Text = 'Отметь кокпиты галочками.'
         return
     }
-    if ($Action -ne 'update' -and $env:COMPUTERNAME -ne 'SIMRACE-14') {
-        $TxtStatus.Text = 'Блокировать и перезагружать кокпиты можно только с SIMRACE-14.'
+    if ($Action -ne 'update' -and $env:COMPUTERNAME -ne $script:AdminComputer) {
+        $TxtStatus.Text = "Блокировать и перезагружать кокпиты можно только с $($script:AdminComputer)."
         return
     }
     $lines = @{}
@@ -659,8 +664,8 @@ function New-VolumeSlider([System.Windows.Controls.Panel]$Panel, [string]$Title,
 
 function Show-VolumePopup($Row, $Anchor) {
     if (-not $Row -or -not $Row.Volumes) { return }
-    if ($env:COMPUTERNAME -ne 'SIMRACE-14') {
-        $TxtStatus.Text = 'Громкость кокпитов меняется только с SIMRACE-14.'
+    if ($env:COMPUTERNAME -ne $script:AdminComputer) {
+        $TxtStatus.Text = "Громкость кокпитов меняется только с $($script:AdminComputer)."
         return
     }
     if ($script:VolumePopup) { $script:VolumePopup.IsOpen = $false }

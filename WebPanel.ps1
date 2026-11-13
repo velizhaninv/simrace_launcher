@@ -1,14 +1,19 @@
 ﻿#Requires -Version 5.1
 <#
-  Веб-панель SIMRACE: окно «Кокпиты» в браузере. Работает только на SIMRACE-14, от имени SYSTEM, с загрузки компьютера.
-  Открывается с ноутбука или планшета в сети клуба: http://SIMRACE-14:8014
-  Вход по паролю администратора SIMRACE-14. Команды кокпитам уходят с адреса SIMRACE-14, как из окна «Кокпиты».
+  Веб-панель SIMRACE: окно «Кокпиты» в браузере. Работает только на управляющем компьютере клуба
+  (club.adminComputer в apps.json: SIMRACE-14 в первом клубе, SIMRACE-1 в филиале), от имени SYSTEM, с загрузки.
+  Открывается с ноутбука или планшета в сети клуба: http://<управляющий компьютер>:8014
+  Вход по паролю его администратора. Команды кокпитам уходят с его адреса, как из окна «Кокпиты».
 #>
 $ErrorActionPreference = 'Stop'
 
 $script:WebPort = 8014
 $script:AgentPort = 47615
-$script:Names = @(1..14 | ForEach-Object { "SIMRACE-$_" })
+# Настройки клуба из apps.json: управляющий компьютер, число кокпитов, ряды
+$script:Club = $null
+try { $script:Club = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json).club } catch { }
+$script:AdminComputer = $(if ($script:Club -and $script:Club.adminComputer) { [string]$script:Club.adminComputer } else { 'SIMRACE-14' })
+$script:Names = @(1..$(if ($script:Club -and $script:Club.computers) { [int]$script:Club.computers } else { 14 }) | ForEach-Object { "SIMRACE-$_" })
 $script:VersionUrl = 'https://raw.githubusercontent.com/velizhaninv/simrace_launcher/main/version.txt'
 $script:AdminUser = $(if ($env:COMPUTERNAME -match '(?i)-14$') { 'admin' } else { 'admin' + [regex]::Match($env:COMPUTERNAME, '(\d+)$').Value })
 
@@ -308,7 +313,7 @@ function Invoke-Api($Context, [string]$Path) {
                 $rows[$name] = $data
             }
             $macs = Get-Macs
-            return Send-Json $Context @{ ok = $true; latest = $script:Cache.Latest; at = $(if ($script:Cache.At) { $script:Cache.At.ToString('HH:mm:ss') } else { '' }); rows = $rows; wake = @($script:Names | Where-Object { @($macs[$_]).Count -gt 0 }) }
+            return Send-Json $Context @{ ok = $true; names = $script:Names; adminComputer = $script:AdminComputer; groups = @($script:Club.groups | Where-Object { $_ }); latest = $script:Cache.Latest; at = $(if ($script:Cache.At) { $script:Cache.At.ToString('HH:mm:ss') } else { '' }); rows = $rows; wake = @($script:Names | Where-Object { @($macs[$_]).Count -gt 0 }) }
         }
         '/api/command' {
             $body = Read-Body $request
@@ -385,6 +390,6 @@ while ($listener.IsListening) {
     try { Invoke-Request $context }
     catch {
         Write-Log "Ошибка запроса $($context.Request.Url.AbsolutePath): $_"
-        try { Send-Json $context @{ ok = $false; error = 'Ошибка на SIMRACE-14.' } 500 } catch { }
+        try { Send-Json $context @{ ok = $false; error = "Ошибка на $($script:AdminComputer)." } 500 } catch { }
     }
 }

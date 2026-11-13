@@ -5194,8 +5194,9 @@ try {
     $BtnAdminTaskMgr.Add_Click({ Open-TaskManager })
     $BtnAdminSteam.Add_Click({ Open-SteamWindow })
     $BtnAdminFleet.Add_Click({ Open-AdminWindow 'Fleet.ps1' 'Кокпиты SIMRACE' })
-    # Управление кокпитами клуба есть только на администраторском компьютере SIMRACE-14
-    if ($env:COMPUTERNAME -match '(?i)-14$') { $BtnAdminFleet.Visibility = 'Visible' }
+    # Управление кокпитами клуба есть только на управляющем компьютере (club.adminComputer)
+    $clubAdmin = $(if ($script:Config.club -and $script:Config.club.adminComputer) { [string]$script:Config.club.adminComputer } else { 'SIMRACE-14' })
+    if ($env:COMPUTERNAME -eq $clubAdmin) { $BtnAdminFleet.Visibility = 'Visible' }
     $BtnAdminUpdate.Add_Click({ Request-AdminUpdate })
     $BtnAdminUwf.Add_Click({ Request-AdminUwf })
     $BtnAdminShutdown.Add_Click({ Show-AdminConfirm 'shutdown' 'Выключить ПК' 'Компьютер выключится. Включить его обратно можно только кнопкой на корпусе.' 'Выключить' })

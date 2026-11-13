@@ -4,6 +4,8 @@
 #>
 & {
     $ErrorActionPreference = 'Stop'
+    # Филиал: перед командой задать $SimraceClub = '2'. Профили клубов лежат в clubs.json
+    if ($SimraceClub) { $env:SIMRACE_CLUB = [string]$SimraceClub }
     try {
         $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
         if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Открой терминал от имени администратора и повтори команду.' }
