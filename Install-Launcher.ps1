@@ -185,8 +185,14 @@ function Install-ServerTool($Config) {
 function Install-AccTelemetry($Config) {
     $source = Join-Path $PSScriptRoot 'ACC Telemetry'
     $exe = Get-ChildItem -LiteralPath $source -Filter '*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $exe) { return }
     $acc = @($Config.apps) | Where-Object { $_.id -eq 'acc' } | Select-Object -First 1
+    if (-not $exe) {
+        # Программы в пакете нет: убираем пункт меню и прежнюю копию, чтобы не запускалась старая версия
+        if ($acc -and $acc.PSObject.Properties['extra2']) { $acc.PSObject.Properties.Remove('extra2') }
+        if (Test-Path -LiteralPath $telemetryTarget) { Remove-Item -LiteralPath $telemetryTarget -Recurse -Force -ErrorAction SilentlyContinue }
+        Remove-NetFirewallRule -Name 'SIMRACE ACC Telemetry' -ErrorAction SilentlyContinue
+        return
+    }
     if (-not $acc) { return }
     New-Item -ItemType Directory -Path $telemetryTarget -Force | Out-Null
     # Программа может быть открыта: тогда остаётся прежняя версия, а обновление лаунчера продолжается
