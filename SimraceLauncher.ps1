@@ -2510,13 +2510,21 @@ function Open-App($App, [bool]$NoticeSeen = $false) {
         Start-LedAmbient
         return
     }
-    # Предупреждение категории: кнопка «ОК» закрывает окно, и запуск продолжается
+    # Напоминание о руле работает и со старыми сохранёнными apps.json.
+    # Объединяем его с предупреждением категории, чтобы не потерять подсказку PRO.
     if (-not $NoticeSeen) {
+        $notices = @()
+        if ($App.Id -eq 'acc' -or $App.Id -match '^f1(?:-|$)') {
+            $notices += 'Убедитесь, что установлен штурвал'
+        }
         $category = @($script:Config.categories | Where-Object { $_ -and $_.id -eq $App.Category }) | Select-Object -First 1
         if ($category -and $category.notice) {
+            $notices += [string]$category.notice
+        }
+        if ($notices.Count -gt 0) {
             $script:NoticeApp = $App
             $TxtNoticeGame.Text = $App.Name
-            $TxtNoticeText.Text = [string]$category.notice
+            $TxtNoticeText.Text = $notices -join "`n`n"
             $NoticePanel.Visibility = 'Visible'
             [void]$BtnNoticeOk.Focus()
             return
@@ -2527,6 +2535,7 @@ function Open-App($App, [bool]$NoticeSeen = $false) {
 }
 
 function Show-GameInfo($App) {
+    $script:EquipmentInfoOpen = $false
     $TxtInfoTitle.Text = $App.Name
     $TxtInfoText.Text = $App.Info
     $InfoPanel.Visibility = 'Visible'
@@ -2535,7 +2544,28 @@ function Show-GameInfo($App) {
 
 function Hide-GameInfo {
     $InfoPanel.Visibility = 'Collapsed'
+    if ($script:EquipmentInfoOpen) {
+        $script:EquipmentInfoOpen = $false
+        [void]$BtnEquipmentInfo.Focus()
+        return
+    }
     if ($script:LastTile) { [void]$script:LastTile.Focus() }
+}
+
+function Show-EquipmentInfo {
+    $script:EquipmentInfoOpen = $true
+    $TxtInfoTitle.Text = 'Оборудование SIMRACE'
+    $TxtInfoText.Text = @'
+MOZA R9 V3 — рулевая база с прямым приводом: мотор передаёт усилие прямо на руль. Почувствуй поребрики, нагрузку в повороте и момент потери сцепления.
+
+MOZA CRP2 — педали с датчиком усилия в тормозе. Торможение зависит от силы нажатия: проще запомнить нужное усилие и повторять точные торможения круг за кругом.
+
+Сменные рули: MOZA KS — штурвал для формул и GT; MOZA CS — круглый универсальный руль с кнопками; Nardi — классический круглый руль для свободной езды и дрифта.
+
+Хочешь сменить руль или настроить посадку? Позови администратора — поможем устроиться удобно.
+'@
+    $InfoPanel.Visibility = 'Visible'
+    [void]$BtnInfoOk.Focus()
 }
 
 # Рекомендуемые рули на карточке игры: картинки wheel-<id>.png рядом с лаунчером
@@ -4614,7 +4644,10 @@ function Submit-Decision([bool]$Lock) {
               <ToolTip><TextBlock x:Name="TxtAxesRaw" FontSize="14" Text="Чтение осей..."/></ToolTip>
             </Border.ToolTip>
             <StackPanel>
-              <TextBlock Text="РУЛЬ" FontSize="12" Foreground="#A2A6AB" Margin="0,0,0,6"/>
+              <Grid Margin="0,0,0,6">
+                <TextBlock Text="РУЛЬ" FontSize="12" Foreground="#A2A6AB" VerticalAlignment="Center"/>
+                <Button x:Name="BtnEquipmentInfo" Content="Об оборудовании" Style="{StaticResource CornerLink}" FontSize="12" Foreground="#C9CCD0" Margin="0" VerticalAlignment="Center" Focusable="True" ToolTip="База, педали и сменные рули SIMRACE"/>
+              </Grid>
               <Canvas Width="196" Height="10" HorizontalAlignment="Left" Margin="0,0,0,14">
                 <Rectangle Width="196" Height="10" RadiusX="5" RadiusY="5" Fill="#26282C"/>
                 <Rectangle x:Name="BarWheel" Canvas.Left="98" Width="0" Height="10" RadiusX="3" RadiusY="3" Fill="{StaticResource Accent}"/>
@@ -4681,13 +4714,15 @@ function Submit-Decision([bool]$Lock) {
         <StackPanel>
           <Rectangle Width="56" Height="3" Fill="{StaticResource Accent}" HorizontalAlignment="Left" Margin="0,0,0,18"/>
           <TextBlock x:Name="TxtInfoTitle" FontSize="34" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,16"/>
-          <TextBlock x:Name="TxtInfoText" FontSize="22" LineHeight="32" Foreground="{StaticResource Soft}" TextWrapping="Wrap" Margin="0,0,0,30"/>
+          <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,30">
+            <TextBlock x:Name="TxtInfoText" FontSize="22" LineHeight="32" Foreground="{StaticResource Soft}" TextWrapping="Wrap"/>
+          </ScrollViewer>
           <Button x:Name="BtnInfoOk" Content="Понятно" Style="{StaticResource StartButton}" FontSize="22" MinWidth="200" HorizontalAlignment="Left"/>
         </StackPanel>
       </Border>
     </Grid>
 
-    <!-- Предупреждение перед запуском игры из категории PRO -->
+    <!-- Напоминание о штурвале и предупреждение категории перед запуском -->
     <Grid x:Name="NoticePanel" Visibility="Collapsed" Background="#9E090A0C">
       <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="640" Background="#F7181A1C" BorderBrush="#29FFFFFF" BorderThickness="1" CornerRadius="18" Padding="48,34,48,36">
         <Border.Effect><DropShadowEffect BlurRadius="44" ShadowDepth="0" Color="#E2450F" Opacity="0.16"/></Border.Effect>
@@ -5213,6 +5248,8 @@ try {
     $AdminPanel.Add_PreviewMouseDown({ $script:AdminLastUse = Get-Date })
 
     $BtnInfoOk.Add_Click({ Hide-GameInfo })
+    $BtnEquipmentInfo = $Window.FindName('BtnEquipmentInfo')
+    $BtnEquipmentInfo.Add_Click({ Show-EquipmentInfo })
     $LockBox.Add_MouseLeftButtonUp({ Switch-SystemMenu })
     $SystemMenu.Add_Closed({ $script:SystemMenuClosedAt = Get-Date })
     # Щелчок мимо карточки тоже закрывает описание
