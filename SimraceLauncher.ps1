@@ -4246,6 +4246,41 @@ function Submit-Decision([bool]$Lock) {
       </Setter>
     </Style>
 
+    <Style x:Key="EquipmentButton" TargetType="Button">
+      <Setter Property="Foreground" Value="#F1F2F3"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Height" Value="36"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="EquipmentBox" CornerRadius="10" BorderThickness="1" BorderBrush="#704E352D" Background="#292321" Padding="9,0">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/></Grid.ColumnDefinitions>
+                <Viewbox Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center">
+                  <Canvas Width="24" Height="24">
+                    <Ellipse Canvas.Left="2" Canvas.Top="2" Width="20" Height="20" Stroke="{StaticResource Accent}" StrokeThickness="1.8"/>
+                    <Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6" Stroke="{StaticResource Accent}" StrokeThickness="1.6"/>
+                    <Path Data="M3,10 L9,11 M15,11 L21,10 M12,15 L12,21" Stroke="{StaticResource Accent}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                  </Canvas>
+                </Viewbox>
+                <ContentPresenter Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Path Grid.Column="2" Data="M1,0 L5,4 L1,8" Stroke="#A8958E" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="EquipmentBox" Property="Background" Value="#3B2923"/>
+                <Setter TargetName="EquipmentBox" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="EquipmentBox" Property="BorderBrush" Value="{StaticResource Accent}"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="EquipmentBox" Property="Background" Value="#542D21"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="InfoBadge" TargetType="Button">
       <Setter Property="Margin" Value="0,10,10,0"/>
       <Setter Property="HorizontalAlignment" Value="Right"/>
@@ -4644,10 +4679,7 @@ function Submit-Decision([bool]$Lock) {
               <ToolTip><TextBlock x:Name="TxtAxesRaw" FontSize="14" Text="Чтение осей..."/></ToolTip>
             </Border.ToolTip>
             <StackPanel>
-              <Grid Margin="0,0,0,6">
-                <TextBlock Text="РУЛЬ" FontSize="12" Foreground="#A2A6AB" VerticalAlignment="Center"/>
-                <Button x:Name="BtnEquipmentInfo" Content="Об оборудовании" Style="{StaticResource CornerLink}" FontSize="12" Foreground="#C9CCD0" Margin="0" VerticalAlignment="Center" Focusable="True" ToolTip="База, педали и сменные рули SIMRACE"/>
-              </Grid>
+              <TextBlock Text="РУЛЬ" FontSize="12" Foreground="#A2A6AB" Margin="0,0,0,6"/>
               <Canvas Width="196" Height="10" HorizontalAlignment="Left" Margin="0,0,0,14">
                 <Rectangle Width="196" Height="10" RadiusX="5" RadiusY="5" Fill="#26282C"/>
                 <Rectangle x:Name="BarWheel" Canvas.Left="98" Width="0" Height="10" RadiusX="3" RadiusY="3" Fill="{StaticResource Accent}"/>
@@ -4673,6 +4705,7 @@ function Submit-Decision([bool]$Lock) {
                 <TextBlock Text="ГАЗ" FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
               </StackPanel>
               </UniformGrid>
+              <Button x:Name="BtnEquipmentInfo" Content="Об оборудовании" Style="{StaticResource EquipmentButton}" FontSize="12" FontWeight="SemiBold" Margin="0,12,0,0" ToolTip="База, педали и сменные рули SIMRACE"/>
             </StackPanel>
           </Border>
           <StackPanel VerticalAlignment="Top" Margin="0,0,32,0">
