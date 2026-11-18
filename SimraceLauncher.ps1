@@ -3912,6 +3912,26 @@ function Submit-Decision([bool]$Lock) {
 
 # ---------- Интерфейс ----------
 
+function Set-HudOutline($Label, $Outline) {
+    # Векторная обводка букв сохраняет резкость при масштабировании Windows.
+    try {
+        $font = [System.Windows.Media.Typeface]::new($Label.FontFamily, $Label.FontStyle, $Label.FontWeight, $Label.FontStretch)
+        $text = [System.Windows.Media.FormattedText]::new(
+            $Label.Text, [Globalization.CultureInfo]::GetCultureInfo('ru-RU'),
+            [System.Windows.FlowDirection]::LeftToRight, $font, $Label.FontSize,
+            $Label.Foreground, [System.Windows.Media.VisualTreeHelper]::GetDpi($Label).PixelsPerDip)
+        $geometry = $text.BuildGeometry([System.Windows.Point]::new(0, 0)).Clone()
+        $bounds = $geometry.Bounds
+        if ($bounds.IsEmpty) { return }
+        $geometry.Transform = [System.Windows.Media.TranslateTransform]::new(-$bounds.X, -$bounds.Y)
+        $geometry.Freeze()
+        $Outline.Data = $geometry
+        $Outline.Visibility = 'Visible'
+        $Label.Visibility = 'Collapsed'
+    }
+    catch { Write-Log "Заголовок HUD: $($_.Exception.Message)" }
+}
+
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -3939,12 +3959,23 @@ function Submit-Decision([bool]$Lock) {
     <SolidColorBrush x:Key="Graphite" Color="#D61F2124"/>
     <SolidColorBrush x:Key="Line" Color="#34373B"/>
     <SolidColorBrush x:Key="Divider" Color="#33FFFFFF"/>
-    <SolidColorBrush x:Key="MenuHighlight" Color="#F4E9D6"/>
-    <FontFamily x:Key="MenuFont">Arial Black, Segoe UI</FontFamily>
+    <SolidColorBrush x:Key="HudWhite" Color="#F8F7F3"/>
+    <SolidColorBrush x:Key="HudInk" Color="#07080C"/>
+    <SolidColorBrush x:Key="HudYellow" Color="#FFB928"/>
+    <SolidColorBrush x:Key="HudMint" Color="#5EF3D3"/>
+    <SolidColorBrush x:Key="HudBlue" Color="#69CFFF"/>
+    <SolidColorBrush x:Key="HudPink" Color="#FF9DD5"/>
+    <FontFamily x:Key="MenuFont">Segoe UI Semibold, Segoe UI</FontFamily>
+    <FontFamily x:Key="DisplayFont">Arial Black, Segoe UI</FontFamily>
 
     <Style x:Key="MenuHeading" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
-      <Setter Property="FontWeight" Value="Black"/>
+      <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
+    </Style>
+    <Style x:Key="HudOutline" TargetType="Path">
+      <Setter Property="HorizontalAlignment" Value="Center"/>
+      <Setter Property="Stroke" Value="{StaticResource HudInk}"/>
+      <Setter Property="StrokeLineJoin" Value="Round"/>
+      <Setter Property="Visibility" Value="Collapsed"/>
     </Style>
 
     <Style x:Key="TileButton" TargetType="Button">
@@ -3993,12 +4024,11 @@ function Submit-Decision([bool]$Lock) {
     </Style>
 
     <Style x:Key="ActionButton" TargetType="Button">
-      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
+      <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
       <Setter Property="FontSize" Value="20"/>
-      <Setter Property="FontWeight" Value="Black"/>
-      <Setter Property="Foreground" Value="{StaticResource MenuHighlight}"/>
-      <Setter Property="Background" Value="#1B1C20"/>
-      <Setter Property="BorderBrush" Value="#4A4240"/>
+      <Setter Property="Foreground" Value="{StaticResource HudWhite}"/>
+      <Setter Property="Background" Value="#222531"/>
+      <Setter Property="BorderBrush" Value="{StaticResource HudInk}"/>
       <Setter Property="Padding" Value="28,12"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -4007,24 +4037,23 @@ function Submit-Decision([bool]$Lock) {
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Grid>
-              <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                      Padding="{TemplateBinding Padding}">
+              <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="3"
+                      CornerRadius="8" Padding="{TemplateBinding Padding}">
                 <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
               </Border>
-              <Border Width="4" HorizontalAlignment="Left" Background="{StaticResource Accent}" IsHitTestVisible="False"/>
             </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{StaticResource MenuHighlight}"/>
-                <Setter Property="Foreground" Value="#181618"/>
-                <Setter Property="BorderBrush" Value="{StaticResource MenuHighlight}"/>
+                <Setter Property="Background" Value="{StaticResource HudMint}"/>
+                <Setter Property="Foreground" Value="{StaticResource HudInk}"/>
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
-                <Setter Property="Background" Value="{StaticResource MenuHighlight}"/>
-                <Setter Property="Foreground" Value="#181618"/>
-                <Setter Property="BorderBrush" Value="{StaticResource MenuHighlight}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource HudMint}"/>
               </Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="#D9C3A5"/></Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter Property="Background" Value="#2CAD98"/>
+                <Setter Property="Foreground" Value="{StaticResource HudInk}"/>
+              </Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -4098,7 +4127,7 @@ function Submit-Decision([bool]$Lock) {
     </Style>
 
     <Style x:Key="AdminTile" TargetType="Button">
-      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
+      <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
       <Setter Property="FontSize" Value="18"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Foreground" Value="White"/>
@@ -4111,19 +4140,19 @@ function Submit-Decision([bool]$Lock) {
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Grid>
-              <Border x:Name="Box" Background="#1C1E21" BorderBrush="#3D3736" BorderThickness="1" Padding="{TemplateBinding Padding}">
+              <Border x:Name="Box" Background="#222531" BorderBrush="{StaticResource HudInk}" BorderThickness="2" CornerRadius="8" Padding="{TemplateBinding Padding}">
                 <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
               </Border>
-              <Border x:Name="SelectionBar" Width="4" HorizontalAlignment="Left" Background="{StaticResource Accent}" Opacity="0" IsHitTestVisible="False"/>
+              <Border x:Name="SelectionBar" Width="4" HorizontalAlignment="Left" Margin="3,8,0,8" CornerRadius="2" Background="{StaticResource HudBlue}" Opacity="0" IsHitTestVisible="False"/>
             </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Box" Property="Background" Value="#352825"/>
-                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="Box" Property="Background" Value="#23354B"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource HudBlue}"/>
                 <Setter TargetName="SelectionBar" Property="Opacity" Value="1"/>
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
-                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource HudBlue}"/>
                 <Setter TargetName="SelectionBar" Property="Opacity" Value="1"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
@@ -4143,7 +4172,7 @@ function Submit-Decision([bool]$Lock) {
     </Style>
     <Style x:Key="AdminIconLabel" TargetType="TextBlock">
       <Setter Property="FontSize" Value="14"/>
-      <Setter Property="FontWeight" Value="Black"/>
+      <Setter Property="FontWeight" Value="Normal"/>
       <Setter Property="Foreground" Value="#C9CCD0"/>
       <Setter Property="HorizontalAlignment" Value="Center"/>
       <Setter Property="TextAlignment" Value="Center"/>
@@ -4153,8 +4182,8 @@ function Submit-Decision([bool]$Lock) {
     <Style x:Key="AdminPrimary" TargetType="Button" BasedOn="{StaticResource ActionButton}">
       <Setter Property="FontSize" Value="18"/>
       <Setter Property="Padding" Value="30,13"/>
-      <Setter Property="Background" Value="#722710"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+      <Setter Property="Background" Value="#224057"/>
+      <Setter Property="BorderBrush" Value="{StaticResource HudBlue}"/>
     </Style>
 
     <Style x:Key="AdminGhost" TargetType="Button" BasedOn="{StaticResource ActionButton}">
@@ -4243,6 +4272,7 @@ function Submit-Decision([bool]$Lock) {
     </Style>
 
     <Style x:Key="EquipmentButton" TargetType="Button">
+      <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
       <Setter Property="Foreground" Value="#F1F2F3"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Height" Value="36"/>
@@ -4250,27 +4280,28 @@ function Submit-Decision([bool]$Lock) {
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="EquipmentBox" CornerRadius="10" BorderThickness="1" BorderBrush="#704E352D" Background="#292321" Padding="9,0">
+            <Border x:Name="EquipmentBox" CornerRadius="8" BorderThickness="2" BorderBrush="{StaticResource HudInk}" Background="#292432" Padding="9,0">
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/></Grid.ColumnDefinitions>
                 <Viewbox Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center">
                   <Canvas Width="24" Height="24">
-                    <Ellipse Canvas.Left="2" Canvas.Top="2" Width="20" Height="20" Stroke="{StaticResource Accent}" StrokeThickness="1.8"/>
-                    <Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6" Stroke="{StaticResource Accent}" StrokeThickness="1.6"/>
-                    <Path Data="M3,10 L9,11 M15,11 L21,10 M12,15 L12,21" Stroke="{StaticResource Accent}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    <Ellipse Width="24" Height="24" Fill="{StaticResource HudPink}" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
+                    <Ellipse Canvas.Left="4.5" Canvas.Top="4.5" Width="15" Height="15" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
+                    <Ellipse Canvas.Left="9.5" Canvas.Top="9.5" Width="5" Height="5" Fill="{StaticResource HudInk}"/>
+                    <Path Data="M5,10 L10,12 M14,12 L19,10 M12,14 L12,19" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
                   </Canvas>
                 </Viewbox>
                 <ContentPresenter Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                <Path Grid.Column="2" Data="M1,0 L5,4 L1,8" Stroke="#A8958E" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                <Path Grid.Column="2" Data="M1,0 L5,4 L1,8" Stroke="{StaticResource HudPink}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Right" VerticalAlignment="Center"/>
               </Grid>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="EquipmentBox" Property="Background" Value="#3B2923"/>
-                <Setter TargetName="EquipmentBox" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="EquipmentBox" Property="Background" Value="#44304E"/>
+                <Setter TargetName="EquipmentBox" Property="BorderBrush" Value="{StaticResource HudPink}"/>
               </Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="EquipmentBox" Property="BorderBrush" Value="{StaticResource Accent}"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="EquipmentBox" Property="Background" Value="#542D21"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="EquipmentBox" Property="BorderBrush" Value="{StaticResource HudPink}"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="EquipmentBox" Property="Background" Value="#533757"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -4310,33 +4341,32 @@ function Submit-Decision([bool]$Lock) {
 
     <Style x:Key="StartButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
       <Setter Property="FontSize" Value="28"/>
-      <Setter Property="Padding" Value="34,15"/>
-      <Setter Property="Background" Value="#722710"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+      <Setter Property="Padding" Value="28,10"/>
+      <Setter Property="Background" Value="{StaticResource HudYellow}"/>
+      <Setter Property="Foreground" Value="{StaticResource HudInk}"/>
     </Style>
 
     <Style x:Key="ToolButton" TargetType="Button">
-      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
+      <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
       <Setter Property="FontSize" Value="17"/>
-      <Setter Property="FontWeight" Value="Black"/>
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#EB1B1C20" BorderBrush="#6C3D30" BorderThickness="3,1,1,1" Padding="14,9">
+            <Border x:Name="Box" Background="#EB222531" BorderBrush="{StaticResource HudInk}" BorderThickness="2" CornerRadius="8" Padding="14,9">
               <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
-                <Setter TargetName="Box" Property="Background" Value="#352825"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource HudBlue}"/>
+                <Setter TargetName="Box" Property="Background" Value="#23354B"/>
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
-                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource HudBlue}"/>
               </Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#4A2C23"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#284867"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -4519,7 +4549,7 @@ function Submit-Decision([bool]$Lock) {
               <Rectangle Width="1" Height="24" Fill="{StaticResource Divider}" Margin="0,0,20,0"/>
             </StackPanel>
             <TextBlock x:Name="TxtComputer" FontSize="20" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,16,0"/>
-            <TextBlock x:Name="TxtClock" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <TextBlock x:Name="TxtClock" FontSize="24" FontFamily="{DynamicResource DisplayFont}" Foreground="{StaticResource HudBlue}" VerticalAlignment="Center"/>
           </StackPanel>
         </Border>
       </StackPanel>
@@ -4530,19 +4560,39 @@ function Submit-Decision([bool]$Lock) {
         </ScrollViewer>
         <Button x:Name="BtnScrollLeft" Content="‹" Style="{StaticResource ScrollArrow}" HorizontalAlignment="Left" Margin="6,0,0,0" Visibility="Collapsed"/>
         <Button x:Name="BtnScrollRight" Content="›" Style="{StaticResource ScrollArrow}" HorizontalAlignment="Right" Margin="0,0,6,0" Visibility="Collapsed"/>
-        <Border x:Name="SessionStart" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Width="760"
-                Background="#F5151518" BorderBrush="#50F4E9D6" BorderThickness="1,4,1,1" Padding="56,26,56,30">
+        <Border x:Name="SessionStart" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Width="710"
+                BorderBrush="{StaticResource HudInk}" BorderThickness="4" CornerRadius="14" Padding="42,24,42,24">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+              <GradientStop Color="#F0131524" Offset="0"/>
+              <GradientStop Color="#F0272033" Offset="1"/>
+            </LinearGradientBrush>
+          </Border.Background>
           <StackPanel>
-            <TextBlock Text="ДОБРО ПОЖАЛОВАТЬ В" Style="{StaticResource MenuHeading}" FontSize="26" TextAlignment="Center" Foreground="{StaticResource MenuHighlight}"/>
-            <TextBlock Text="SIMRACE" Style="{StaticResource MenuHeading}" FontSize="78" TextAlignment="Center" Foreground="{StaticResource MenuHighlight}" Margin="0,-7,0,0">
-              <TextBlock.Effect><DropShadowEffect Color="#A8310C" Direction="270" ShadowDepth="5" BlurRadius="0" Opacity="1"/></TextBlock.Effect>
-            </TextBlock>
-            <TextBlock Text="Удачи в гонке!" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource Soft}" TextAlignment="Center" Margin="0,2,0,24"/>
-            <Button x:Name="BtnStartSession" Style="{StaticResource StartButton}" AutomationProperties.Name="Начать заезд">
-              <StackPanel Orientation="Horizontal">
-                <Path Data="M0,0 L0,16 L13,8 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center" Margin="0,0,14,0"/>
-                <TextBlock Text="НАЧАТЬ ЗАЕЗД" VerticalAlignment="Center"/>
-              </StackPanel>
+            <Grid>
+              <TextBlock x:Name="WelcomeLabel" Text="ДОБРО ПОЖАЛОВАТЬ В" FontFamily="{DynamicResource DisplayFont}" FontSize="28"
+                         TextAlignment="Center" Foreground="{StaticResource HudWhite}"/>
+              <Path x:Name="WelcomeOutline" Style="{StaticResource HudOutline}" Fill="{StaticResource HudWhite}" StrokeThickness="4"/>
+            </Grid>
+            <Grid Margin="0,5,0,0">
+              <TextBlock x:Name="BrandLabel" Text="SIMRACE" FontFamily="{DynamicResource DisplayFont}" FontSize="86"
+                         TextAlignment="Center" Foreground="{StaticResource HudYellow}"/>
+              <Path x:Name="BrandOutline" Style="{StaticResource HudOutline}" Fill="{StaticResource HudYellow}" StrokeThickness="8">
+                <Path.Effect><DropShadowEffect Color="#FF9DD5" ShadowDepth="4" Direction="270" BlurRadius="0" Opacity="0.85"/></Path.Effect>
+              </Path>
+            </Grid>
+            <TextBlock Text="Удачи в гонке!" Style="{StaticResource MenuHeading}" FontSize="19" Foreground="{StaticResource HudBlue}" TextAlignment="Center" Margin="0,11,0,17"/>
+            <Button x:Name="BtnStartSession" Width="380" HorizontalAlignment="Center" Style="{StaticResource StartButton}" AutomationProperties.Name="Начать заезд">
+              <DockPanel LastChildFill="True">
+                <Border Width="37" Height="37" DockPanel.Dock="Left" CornerRadius="18.5" Background="{StaticResource HudWhite}"
+                        BorderBrush="{StaticResource HudInk}" BorderThickness="2" Margin="0,0,12,0">
+                  <Canvas Width="20" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Path Data="M2,2 V20 M2,2 H18 V14 H2" Stroke="{StaticResource HudInk}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    <Path Data="M3,3 H7 V6 H3 Z M7,6 H12 V10 H7 Z M12,3 H17 V6 H12 Z M3,10 H7 V13 H3 Z M12,10 H17 V13 H12 Z" Fill="{StaticResource HudInk}"/>
+                  </Canvas>
+                </Border>
+                <TextBlock Text="НАЧАТЬ ЗАЕЗД" FontSize="25" VerticalAlignment="Center"/>
+              </DockPanel>
             </Button>
             <TextBlock x:Name="TxtLastSession" FontSize="18" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,16,0,0"/>
           </StackPanel>
@@ -4726,7 +4776,7 @@ function Submit-Decision([bool]$Lock) {
         <Border.Effect><DropShadowEffect BlurRadius="44" ShadowDepth="0" Color="#E2450F" Opacity="0.16"/></Border.Effect>
         <StackPanel>
           <Rectangle Width="56" Height="3" Fill="{StaticResource Accent}" HorizontalAlignment="Left" Margin="0,0,0,18"/>
-          <TextBlock x:Name="TxtInfoTitle" FontSize="34" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,16"/>
+          <TextBlock x:Name="TxtInfoTitle" Style="{StaticResource MenuHeading}" FontSize="34" Foreground="{StaticResource HudPink}" TextWrapping="Wrap" Margin="0,0,0,16"/>
           <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,30">
             <TextBlock x:Name="TxtInfoText" FontSize="22" LineHeight="32" Foreground="{StaticResource Soft}" TextWrapping="Wrap"/>
           </ScrollViewer>
@@ -4741,7 +4791,7 @@ function Submit-Decision([bool]$Lock) {
         <Border.Effect><DropShadowEffect BlurRadius="44" ShadowDepth="0" Color="#E2450F" Opacity="0.16"/></Border.Effect>
         <StackPanel>
           <TextBlock x:Name="TxtNoticeGame" FontSize="18" Foreground="{StaticResource Muted}" TextAlignment="Center" Margin="0,0,0,6"/>
-          <TextBlock x:Name="TxtNoticeText" FontSize="34" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,28"/>
+          <TextBlock x:Name="TxtNoticeText" Style="{StaticResource MenuHeading}" Foreground="{StaticResource HudYellow}" FontSize="34" TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,28"/>
           <Button x:Name="BtnNoticeOk" Content="ОК" Style="{StaticResource StartButton}" FontSize="22" MinWidth="200" HorizontalAlignment="Center"/>
         </StackPanel>
       </Border>
@@ -4797,7 +4847,7 @@ function Submit-Decision([bool]$Lock) {
                 <TextBlock x:Name="TxtUwfState" Text="Проверяю защиту UWF" FontSize="15" Foreground="{StaticResource Soft}"/>
               </StackPanel>
             </Border>
-            <TextBlock x:Name="TxtAdminTitle" Text="Панель администратора" FontSize="30" FontWeight="SemiBold"/>
+            <TextBlock x:Name="TxtAdminTitle" Text="Панель администратора" Style="{StaticResource MenuHeading}" Foreground="{StaticResource HudBlue}" FontSize="30"/>
           </DockPanel>
 
           <StackPanel x:Name="AdminLogin" Margin="0,14,0,0">
@@ -4892,10 +4942,11 @@ function Submit-Decision([bool]$Lock) {
   <Window.Resources>
     <SolidColorBrush x:Key="Accent" Color="#E2450F"/>
     <SolidColorBrush x:Key="Line" Color="#3E4145"/>
+    <SolidColorBrush x:Key="PanelHighlight" Color="#69CFFF"/>
+    <FontFamily x:Key="MenuFont">Segoe UI Semibold, Segoe UI</FontFamily>
     <Style x:Key="PanelButton" TargetType="Button">
       <Setter Property="FontSize" Value="15"/>
-      <Setter Property="FontFamily" Value="Arial Black, Segoe UI"/>
-      <Setter Property="FontWeight" Value="Black"/>
+      <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="4"/>
@@ -4903,16 +4954,16 @@ function Submit-Decision([bool]$Lock) {
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#1B1C20" BorderBrush="#6C3D30" BorderThickness="3,1,1,1" Padding="10,9">
+            <Border x:Name="Box" Background="#222531" BorderBrush="#07080C" BorderThickness="2" CornerRadius="8" Padding="10,9">
               <ContentPresenter VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
-                <Setter TargetName="Box" Property="Background" Value="#352825"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource PanelHighlight}"/>
+                <Setter TargetName="Box" Property="Background" Value="#23354B"/>
               </Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="#E2450F"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#4A2C23"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource PanelHighlight}"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#284867"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -5103,6 +5154,14 @@ try {
 
     # Шрифты приборки лежат в папке лаунчера, устанавливать их не нужно
     $fontsUri = New-Object System.Uri((Join-Path $script:Root 'fonts') + '\')
+    if (Test-Path -LiteralPath (Join-Path $script:Root 'fonts\RubikMonoOne-Regular.ttf')) {
+        $Window.Resources['DisplayFont'] = [System.Windows.Media.FontFamily]::new($fontsUri, './#Rubik Mono One')
+    }
+    if (Test-Path -LiteralPath (Join-Path $script:Root 'fonts\RussoOne-Regular.ttf')) {
+        $Window.Resources['MenuFont'] = [System.Windows.Media.FontFamily]::new($fontsUri, './#Russo One')
+    }
+    Set-HudOutline ($Window.FindName('WelcomeLabel')) ($Window.FindName('WelcomeOutline'))
+    Set-HudOutline ($Window.FindName('BrandLabel')) ($Window.FindName('BrandOutline'))
     $script:DashFont = New-Object System.Windows.Media.FontFamily($fontsUri, './#Barlow Medium')
     # Race Position: номер компьютера из имени, например simrace-2 это 2
     $number = [regex]::Match($env:COMPUTERNAME, '(\d+)$')
@@ -5166,6 +5225,7 @@ try {
     })
 
     $MixerWindow = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $mixerXaml))
+    $MixerWindow.Resources['MenuFont'] = $Window.Resources['MenuFont']
     foreach ($name in 'OutputList', 'PanelTools', 'TxtPanelSession', 'SliderSystem', 'SliderGame', 'SliderMumble', 'SliderBrowser', 'TxtSystem', 'TxtGame', 'TxtMumble', 'TxtBrowser') {
         Set-Variable -Name $name -Value $MixerWindow.FindName($name) -Scope Script
     }
