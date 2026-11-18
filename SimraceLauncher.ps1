@@ -3939,6 +3939,13 @@ function Submit-Decision([bool]$Lock) {
     <SolidColorBrush x:Key="Graphite" Color="#D61F2124"/>
     <SolidColorBrush x:Key="Line" Color="#34373B"/>
     <SolidColorBrush x:Key="Divider" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="MenuHighlight" Color="#F4E9D6"/>
+    <FontFamily x:Key="MenuFont">Arial Black, Segoe UI</FontFamily>
+
+    <Style x:Key="MenuHeading" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
+      <Setter Property="FontWeight" Value="Black"/>
+    </Style>
 
     <Style x:Key="TileButton" TargetType="Button">
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -3986,24 +3993,39 @@ function Submit-Decision([bool]$Lock) {
     </Style>
 
     <Style x:Key="ActionButton" TargetType="Button">
+      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
       <Setter Property="FontSize" Value="20"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontWeight" Value="Black"/>
+      <Setter Property="Foreground" Value="{StaticResource MenuHighlight}"/>
+      <Setter Property="Background" Value="#1B1C20"/>
+      <Setter Property="BorderBrush" Value="#4A4240"/>
+      <Setter Property="Padding" Value="28,12"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#1F2124" BorderBrush="{StaticResource Line}" BorderThickness="2" Padding="32,14">
-              <ContentPresenter HorizontalAlignment="Center"/>
-            </Border>
+            <Grid>
+              <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                      Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+              </Border>
+              <Border Width="4" HorizontalAlignment="Left" Background="{StaticResource Accent}" IsHitTestVisible="False"/>
+            </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter Property="Background" Value="{StaticResource MenuHighlight}"/>
+                <Setter Property="Foreground" Value="#181618"/>
+                <Setter Property="BorderBrush" Value="{StaticResource MenuHighlight}"/>
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
-                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter Property="Background" Value="{StaticResource MenuHighlight}"/>
+                <Setter Property="Foreground" Value="#181618"/>
+                <Setter Property="BorderBrush" Value="{StaticResource MenuHighlight}"/>
               </Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="#D9C3A5"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -4076,6 +4098,7 @@ function Submit-Decision([bool]$Lock) {
     </Style>
 
     <Style x:Key="AdminTile" TargetType="Button">
+      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
       <Setter Property="FontSize" Value="18"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Foreground" Value="White"/>
@@ -4087,16 +4110,21 @@ function Submit-Decision([bool]$Lock) {
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#1C1E21" BorderBrush="#2E3135" BorderThickness="1" CornerRadius="14" Padding="{TemplateBinding Padding}">
-              <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
-            </Border>
+            <Grid>
+              <Border x:Name="Box" Background="#1C1E21" BorderBrush="#3D3736" BorderThickness="1" Padding="{TemplateBinding Padding}">
+                <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+              </Border>
+              <Border x:Name="SelectionBar" Width="4" HorizontalAlignment="Left" Background="{StaticResource Accent}" Opacity="0" IsHitTestVisible="False"/>
+            </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Box" Property="Background" Value="#26282C"/>
+                <Setter TargetName="Box" Property="Background" Value="#352825"/>
                 <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="SelectionBar" Property="Opacity" Value="1"/>
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
                 <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="SelectionBar" Property="Opacity" Value="1"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
                 <Setter TargetName="Box" Property="Background" Value="#303338"/>
@@ -4115,55 +4143,23 @@ function Submit-Decision([bool]$Lock) {
     </Style>
     <Style x:Key="AdminIconLabel" TargetType="TextBlock">
       <Setter Property="FontSize" Value="14"/>
-      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="FontWeight" Value="Black"/>
       <Setter Property="Foreground" Value="#C9CCD0"/>
       <Setter Property="HorizontalAlignment" Value="Center"/>
       <Setter Property="TextAlignment" Value="Center"/>
       <Setter Property="Margin" Value="0,8,0,0"/>
     </Style>
 
-    <Style x:Key="AdminPrimary" TargetType="Button">
+    <Style x:Key="AdminPrimary" TargetType="Button" BasedOn="{StaticResource ActionButton}">
       <Setter Property="FontSize" Value="18"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#D23F0D" CornerRadius="12" Padding="30,13">
-              <ContentPresenter HorizontalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="#E8501B"/></Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="Background" Value="#E8501B"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#B8350A"/></Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
+      <Setter Property="Padding" Value="30,13"/>
+      <Setter Property="Background" Value="#722710"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
     </Style>
 
-    <Style x:Key="AdminGhost" TargetType="Button">
+    <Style x:Key="AdminGhost" TargetType="Button" BasedOn="{StaticResource ActionButton}">
       <Setter Property="FontSize" Value="18"/>
       <Setter Property="Padding" Value="30,12"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="Transparent" BorderBrush="#3A3D42" BorderThickness="1" CornerRadius="12" Padding="{TemplateBinding Padding}">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="#26282C"/></Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/></Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
     </Style>
 
     <Style x:Key="AdminInputBox" TargetType="Border">
@@ -4312,48 +4308,35 @@ function Submit-Decision([bool]$Lock) {
       </Setter>
     </Style>
 
-    <Style x:Key="StartButton" TargetType="Button">
+    <Style x:Key="StartButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
       <Setter Property="FontSize" Value="28"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#C82F03" CornerRadius="14" Padding="40,18">
-              <ContentPresenter HorizontalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="#E2450F"/></Trigger>
-              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="Background" Value="#E2450F"/></Trigger>
-              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#A92702"/></Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
+      <Setter Property="Padding" Value="34,15"/>
+      <Setter Property="Background" Value="#722710"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
     </Style>
 
     <Style x:Key="ToolButton" TargetType="Button">
-      <Setter Property="FontSize" Value="18"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="FontFamily" Value="{StaticResource MenuFont}"/>
+      <Setter Property="FontSize" Value="17"/>
+      <Setter Property="FontWeight" Value="Black"/>
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#B3121315" BorderBrush="{StaticResource LogoColor}" BorderThickness="2" CornerRadius="18" Padding="14,9,14,9">
+            <Border x:Name="Box" Background="#EB1B1C20" BorderBrush="#6C3D30" BorderThickness="3,1,1,1" Padding="14,9">
               <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
-                <Setter TargetName="Box" Property="Background" Value="#E61F2124"/>
+                <Setter TargetName="Box" Property="Background" Value="#352825"/>
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
                 <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
               </Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#4A2C23"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -4548,22 +4531,19 @@ function Submit-Decision([bool]$Lock) {
         <Button x:Name="BtnScrollLeft" Content="‹" Style="{StaticResource ScrollArrow}" HorizontalAlignment="Left" Margin="6,0,0,0" Visibility="Collapsed"/>
         <Button x:Name="BtnScrollRight" Content="›" Style="{StaticResource ScrollArrow}" HorizontalAlignment="Right" Margin="0,0,6,0" Visibility="Collapsed"/>
         <Border x:Name="SessionStart" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Width="760"
-                Background="#EB121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="56,38,56,38">
+                Background="#F5151518" BorderBrush="#50F4E9D6" BorderThickness="1,4,1,1" Padding="56,26,56,30">
           <StackPanel>
-            <TextBlock FontSize="36" FontWeight="SemiBold" TextAlignment="Center" LineHeight="48" Margin="0,0,0,30" Text="Добро пожаловать в SIMRACE!&#10;Удачи в гонке!">
-              <TextBlock.Triggers>
-                <EventTrigger RoutedEvent="FrameworkElement.Loaded">
-                  <BeginStoryboard>
-                    <Storyboard RepeatBehavior="Forever" AutoReverse="True">
-                      <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0.62" Duration="0:0:1.8">
-                        <DoubleAnimation.EasingFunction><SineEase EasingMode="EaseInOut"/></DoubleAnimation.EasingFunction>
-                      </DoubleAnimation>
-                    </Storyboard>
-                  </BeginStoryboard>
-                </EventTrigger>
-              </TextBlock.Triggers>
+            <TextBlock Text="ДОБРО ПОЖАЛОВАТЬ В" Style="{StaticResource MenuHeading}" FontSize="26" TextAlignment="Center" Foreground="{StaticResource MenuHighlight}"/>
+            <TextBlock Text="SIMRACE" Style="{StaticResource MenuHeading}" FontSize="78" TextAlignment="Center" Foreground="{StaticResource MenuHighlight}" Margin="0,-7,0,0">
+              <TextBlock.Effect><DropShadowEffect Color="#A8310C" Direction="270" ShadowDepth="5" BlurRadius="0" Opacity="1"/></TextBlock.Effect>
             </TextBlock>
-            <Button x:Name="BtnStartSession" Content="Начать заезд" Style="{StaticResource StartButton}"/>
+            <TextBlock Text="Удачи в гонке!" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource Soft}" TextAlignment="Center" Margin="0,2,0,24"/>
+            <Button x:Name="BtnStartSession" Style="{StaticResource StartButton}" AutomationProperties.Name="Начать заезд">
+              <StackPanel Orientation="Horizontal">
+                <Path Data="M0,0 L0,16 L13,8 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                <TextBlock Text="НАЧАТЬ ЗАЕЗД" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Button>
             <TextBlock x:Name="TxtLastSession" FontSize="18" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,16,0,0"/>
           </StackPanel>
         </Border>
@@ -4611,7 +4591,7 @@ function Submit-Decision([bool]$Lock) {
 
         <StackPanel x:Name="SelectedInfo">
           <Rectangle Width="72" Height="3" Fill="{StaticResource Accent}" HorizontalAlignment="Left" Margin="0,0,0,14"/>
-          <TextBlock x:Name="TxtSelected" Text="Выбери игру" FontSize="42" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+          <TextBlock x:Name="TxtSelected" Text="Выбери игру" Style="{StaticResource MenuHeading}" FontSize="42" TextTrimming="CharacterEllipsis"/>
           <TextBlock x:Name="TxtHint" Text="Наведи курсор на обложку" FontSize="20" Foreground="{StaticResource Muted}"/>
         </StackPanel>
         <TextBlock Text="Свернуть игру: Ctrl+Shift+End" FontSize="15" Foreground="#7C8085" Margin="0,10,0,0"/>
@@ -4914,7 +4894,8 @@ function Submit-Decision([bool]$Lock) {
     <SolidColorBrush x:Key="Line" Color="#3E4145"/>
     <Style x:Key="PanelButton" TargetType="Button">
       <Setter Property="FontSize" Value="15"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="FontFamily" Value="Arial Black, Segoe UI"/>
+      <Setter Property="FontWeight" Value="Black"/>
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="4"/>
@@ -4922,12 +4903,16 @@ function Submit-Decision([bool]$Lock) {
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Box" Background="#26282B" BorderBrush="#3E4145" BorderThickness="1" CornerRadius="12" Padding="10,9">
+            <Border x:Name="Box" Background="#1B1C20" BorderBrush="#6C3D30" BorderThickness="3,1,1,1" Padding="10,9">
               <ContentPresenter VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="#E2450F"/></Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="Box" Property="Background" Value="#352825"/>
+              </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="#E2450F"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Background" Value="#4A2C23"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
