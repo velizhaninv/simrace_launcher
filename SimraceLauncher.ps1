@@ -2028,7 +2028,7 @@ function Set-PedalBar($Bar, [string]$Name, $Readings) {
     if (-not $script:AxisInvert.ContainsKey($Name)) { $script:AxisInvert[$Name] = $value -gt 32767 }
     $part = $value / 65535.0
     if ($script:AxisInvert[$Name]) { $part = 1 - $part }
-    $Bar.Height = [Math]::Round($part * 72)
+    $Bar.Height = [Math]::Round($part * $Bar.Parent.Height)
 }
 
 # Обновляется, только пока лаунчер на экране: в игре оси не читаем
@@ -2538,6 +2538,11 @@ function Show-GameInfo($App) {
     $script:EquipmentInfoOpen = $false
     $TxtInfoTitle.Text = $App.Name
     $TxtInfoText.Text = $App.Info
+    $InfoLabel.Visibility = 'Visible'
+    $TxtInfoText.Visibility = 'Visible'
+    $EquipmentDetails.Visibility = 'Collapsed'
+    $art = $(if ($App.Id -eq 'acc' -and $App.Name -ceq 'Assetto Corsa Competizione') { 'hud\about-acc.png' } else { '' })
+    Set-HudLettering $TxtInfoTitle $InfoTitleArt $art
     $InfoPanel.Visibility = 'Visible'
     [void]$BtnInfoOk.Focus()
 }
@@ -2554,16 +2559,11 @@ function Hide-GameInfo {
 
 function Show-EquipmentInfo {
     $script:EquipmentInfoOpen = $true
-    $TxtInfoTitle.Text = 'Оборудование SIMRACE'
-    $TxtInfoText.Text = @'
-MOZA R9 V3 — рулевая база с прямым приводом: мотор передаёт усилие прямо на руль. Почувствуй поребрики, нагрузку в повороте и момент потери сцепления.
-
-MOZA CRP2 — педали с датчиком усилия в тормозе. Торможение зависит от силы нажатия: проще запомнить нужное усилие и повторять точные торможения круг за кругом.
-
-Сменные рули: MOZA KS — штурвал для формул и GT; MOZA CS — круглый универсальный руль с кнопками; Nardi — классический круглый руль для свободной езды и дрифта.
-
-Хочешь сменить руль или настроить посадку? Позови администратора — поможем устроиться удобно.
-'@
+    $TxtInfoTitle.Text = 'Об оборудовании'
+    $InfoLabel.Visibility = 'Collapsed'
+    $TxtInfoText.Visibility = 'Collapsed'
+    $EquipmentDetails.Visibility = 'Visible'
+    Set-HudLettering $TxtInfoTitle $InfoTitleArt 'hud\equipment.png'
     $InfoPanel.Visibility = 'Visible'
     [void]$BtnInfoOk.Focus()
 }
@@ -3912,24 +3912,16 @@ function Submit-Decision([bool]$Lock) {
 
 # ---------- Интерфейс ----------
 
-function Set-HudOutline($Label, $Outline) {
-    # Векторная обводка букв сохраняет резкость при масштабировании Windows.
-    try {
-        $font = [System.Windows.Media.Typeface]::new($Label.FontFamily, $Label.FontStyle, $Label.FontWeight, $Label.FontStretch)
-        $text = [System.Windows.Media.FormattedText]::new(
-            $Label.Text, [Globalization.CultureInfo]::GetCultureInfo('ru-RU'),
-            [System.Windows.FlowDirection]::LeftToRight, $font, $Label.FontSize,
-            $Label.Foreground, [System.Windows.Media.VisualTreeHelper]::GetDpi($Label).PixelsPerDip)
-        $geometry = $text.BuildGeometry([System.Windows.Point]::new(0, 0)).Clone()
-        $bounds = $geometry.Bounds
-        if ($bounds.IsEmpty) { return }
-        $geometry.Transform = [System.Windows.Media.TranslateTransform]::new(-$bounds.X, -$bounds.Y)
-        $geometry.Freeze()
-        $Outline.Data = $geometry
-        $Outline.Visibility = 'Visible'
+function Set-HudLettering($Label, $Picture, [string]$File) {
+    # Pricedown используется как готовая графика. Без картинки остаётся текст.
+    if ($File -and (Set-ImageFile $Picture $File)) {
+        $Picture.Visibility = 'Visible'
         $Label.Visibility = 'Collapsed'
     }
-    catch { Write-Log "Заголовок HUD: $($_.Exception.Message)" }
+    else {
+        $Picture.Visibility = 'Collapsed'
+        $Label.Visibility = 'Visible'
+    }
 }
 
 [xml]$xaml = @'
@@ -3959,23 +3951,18 @@ function Set-HudOutline($Label, $Outline) {
     <SolidColorBrush x:Key="Graphite" Color="#D61F2124"/>
     <SolidColorBrush x:Key="Line" Color="#34373B"/>
     <SolidColorBrush x:Key="Divider" Color="#33FFFFFF"/>
-    <SolidColorBrush x:Key="HudWhite" Color="#F8F7F3"/>
-    <SolidColorBrush x:Key="HudInk" Color="#07080C"/>
-    <SolidColorBrush x:Key="HudYellow" Color="#FFB928"/>
-    <SolidColorBrush x:Key="HudMint" Color="#5EF3D3"/>
-    <SolidColorBrush x:Key="HudBlue" Color="#69CFFF"/>
-    <SolidColorBrush x:Key="HudPink" Color="#FF9DD5"/>
+    <SolidColorBrush x:Key="HudWhite" Color="#FCF8EF"/>
+    <SolidColorBrush x:Key="HudInk" Color="#101014"/>
+    <SolidColorBrush x:Key="HudYellow" Color="#FFBD32"/>
+    <SolidColorBrush x:Key="HudAmber" Color="#FFD083"/>
+    <SolidColorBrush x:Key="HudBlue" Color="#A9DEF0"/>
+    <SolidColorBrush x:Key="HudPink" Color="#F7AFCC"/>
+    <SolidColorBrush x:Key="HudGreen" Color="#B6D99B"/>
     <FontFamily x:Key="MenuFont">Segoe UI Semibold, Segoe UI</FontFamily>
     <FontFamily x:Key="DisplayFont">Arial Black, Segoe UI</FontFamily>
 
     <Style x:Key="MenuHeading" TargetType="TextBlock">
       <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
-    </Style>
-    <Style x:Key="HudOutline" TargetType="Path">
-      <Setter Property="HorizontalAlignment" Value="Center"/>
-      <Setter Property="Stroke" Value="{StaticResource HudInk}"/>
-      <Setter Property="StrokeLineJoin" Value="Round"/>
-      <Setter Property="Visibility" Value="Collapsed"/>
     </Style>
 
     <Style x:Key="TileButton" TargetType="Button">
@@ -3992,7 +3979,7 @@ function Set-HudOutline($Label, $Outline) {
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="Cover" Property="Opacity" Value="1"/>
-                <Setter TargetName="Frame" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="Frame" Property="BorderBrush" Value="{StaticResource HudYellow}"/>
                 <Trigger.EnterActions>
                   <BeginStoryboard>
                     <Storyboard>
@@ -4012,7 +3999,7 @@ function Set-HudOutline($Label, $Outline) {
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
                 <Setter TargetName="Cover" Property="Opacity" Value="1"/>
-                <Setter TargetName="Frame" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="Frame" Property="BorderBrush" Value="{StaticResource HudYellow}"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
                 <Setter TargetName="Cover" Property="Opacity" Value="0.6"/>
@@ -4027,8 +4014,8 @@ function Set-HudOutline($Label, $Outline) {
       <Setter Property="FontFamily" Value="{DynamicResource MenuFont}"/>
       <Setter Property="FontSize" Value="20"/>
       <Setter Property="Foreground" Value="{StaticResource HudWhite}"/>
-      <Setter Property="Background" Value="#222531"/>
-      <Setter Property="BorderBrush" Value="{StaticResource HudInk}"/>
+      <Setter Property="Background" Value="#EB18151B"/>
+      <Setter Property="BorderBrush" Value="#55FFFFFF"/>
       <Setter Property="Padding" Value="28,12"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -4037,22 +4024,22 @@ function Set-HudOutline($Label, $Outline) {
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Grid>
-              <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="3"
-                      CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                      CornerRadius="2" Padding="{TemplateBinding Padding}">
                 <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
               </Border>
+              <Border Width="3" Background="{StaticResource HudYellow}" HorizontalAlignment="Left" IsHitTestVisible="False"/>
             </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{StaticResource HudMint}"/>
-                <Setter Property="Foreground" Value="{StaticResource HudInk}"/>
+                <Setter Property="Background" Value="#FF3A2925"/>
+                <Setter Property="BorderBrush" Value="{StaticResource HudAmber}"/>
               </Trigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
-                <Setter Property="BorderBrush" Value="{StaticResource HudMint}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource HudAmber}"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter Property="Background" Value="#2CAD98"/>
-                <Setter Property="Foreground" Value="{StaticResource HudInk}"/>
+                <Setter Property="Background" Value="#FF50332B"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
             </ControlTemplate.Triggers>
@@ -4280,12 +4267,12 @@ function Set-HudOutline($Label, $Outline) {
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="EquipmentBox" CornerRadius="8" BorderThickness="2" BorderBrush="{StaticResource HudInk}" Background="#292432" Padding="9,0">
+            <Border x:Name="EquipmentBox" CornerRadius="2" BorderThickness="1" BorderBrush="#55FFFFFF" Background="#FF1B191D" Padding="9,0">
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/></Grid.ColumnDefinitions>
                 <Viewbox Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center">
                   <Canvas Width="24" Height="24">
-                    <Ellipse Width="24" Height="24" Fill="{StaticResource HudPink}" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
+                    <Ellipse Width="24" Height="24" Fill="{StaticResource HudWhite}" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
                     <Ellipse Canvas.Left="4.5" Canvas.Top="4.5" Width="15" Height="15" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
                     <Ellipse Canvas.Left="9.5" Canvas.Top="9.5" Width="5" Height="5" Fill="{StaticResource HudInk}"/>
                     <Path Data="M5,10 L10,12 M14,12 L19,10 M12,14 L12,19" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
@@ -4342,8 +4329,6 @@ function Set-HudOutline($Label, $Outline) {
     <Style x:Key="StartButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
       <Setter Property="FontSize" Value="28"/>
       <Setter Property="Padding" Value="28,10"/>
-      <Setter Property="Background" Value="{StaticResource HudYellow}"/>
-      <Setter Property="Foreground" Value="{StaticResource HudInk}"/>
     </Style>
 
     <Style x:Key="ToolButton" TargetType="Button">
@@ -4374,11 +4359,14 @@ function Set-HudOutline($Label, $Outline) {
     </Style>
 
     <Style x:Key="FeatureIcon" TargetType="Path">
-      <Setter Property="Stroke" Value="{StaticResource Accent}"/>
-      <Setter Property="StrokeThickness" Value="1.7"/>
+      <Setter Property="Stroke" Value="{StaticResource HudInk}"/>
+      <Setter Property="StrokeThickness" Value="3"/>
       <Setter Property="StrokeStartLineCap" Value="Round"/>
       <Setter Property="StrokeEndLineCap" Value="Round"/>
       <Setter Property="StrokeLineJoin" Value="Round"/>
+      <Setter Property="RenderTransform">
+        <Setter.Value><ScaleTransform ScaleX="0.8" ScaleY="0.8" CenterX="24" CenterY="24"/></Setter.Value>
+      </Setter>
     </Style>
     <Style x:Key="FeatureTitle" TargetType="TextBlock">
       <Setter Property="FontSize" Value="22"/>
@@ -4394,15 +4382,34 @@ function Set-HudOutline($Label, $Outline) {
 
   <Grid>
     <Image x:Name="BackgroundImage" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    <Border x:Name="SunsetShade" Visibility="Collapsed" IsHitTestVisible="False">
+      <Border.Background>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+          <GradientStop Color="#B0231723" Offset="0"/>
+          <GradientStop Color="#25391C32" Offset="0.33"/>
+          <GradientStop Color="#30221722" Offset="0.61"/>
+          <GradientStop Color="#F00C0B10" Offset="1"/>
+        </LinearGradientBrush>
+      </Border.Background>
+      <Border>
+        <Border.Background>
+          <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+            <GradientStop Color="#8C120C15" Offset="0"/>
+            <GradientStop Color="#331A1418" Offset="0.5"/>
+            <GradientStop Color="#00120C15" Offset="0.86"/>
+          </LinearGradientBrush>
+        </Border.Background>
+      </Border>
+    </Border>
 
     <!-- Версия лаунчера: мелко в левом нижнем углу -->
     <TextBlock x:Name="TxtVersion" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="18,0,0,10" FontSize="12" Foreground="#6C6F73" IsHitTestVisible="False"/>
 
     <!-- Номер кокпита: плашка у верхнего края экрана по центру, как вырез. Номер берётся из имени компьютера -->
-    <Border x:Name="PcBadge" HorizontalAlignment="Center" VerticalAlignment="Top" Background="#E61C1E21" BorderBrush="#3A3D42" BorderThickness="1,0,1,1"
+    <Border x:Name="PcBadge" HorizontalAlignment="Center" VerticalAlignment="Top" Background="#F2151219" BorderBrush="#55FFFFFF" BorderThickness="1,0,1,1"
             CornerRadius="0,0,18,18" Padding="30,5,30,8" MinWidth="128">
       <TextBlock HorizontalAlignment="Center" FontSize="20" FontWeight="SemiBold">
-        <Run Text="№" Foreground="{StaticResource Accent}"/><Run x:Name="RunPcNumber" Text="" Foreground="White"/>
+        <Run Text="№" Foreground="{StaticResource HudYellow}"/><Run x:Name="RunPcNumber" Text="" Foreground="{StaticResource HudWhite}"/>
       </TextBlock>
     </Border>
 
@@ -4417,7 +4424,13 @@ function Set-HudOutline($Label, $Outline) {
       <!-- Логотип и кнопки по краям, блок с направлениями точно по центру экрана -->
       <Grid Grid.Row="0">
         <Grid x:Name="LogoHost" HorizontalAlignment="Left" VerticalAlignment="Center">
-          <Image x:Name="LogoImage" Stretch="Uniform" Height="54" HorizontalAlignment="Left"/>
+          <Image x:Name="LogoImage" Stretch="Uniform" Height="54" HorizontalAlignment="Left" Opacity="0"/>
+          <Rectangle Width="{Binding ActualWidth, ElementName=LogoImage}" Height="{Binding ActualHeight, ElementName=LogoImage}"
+                     Fill="{StaticResource HudWhite}" HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False">
+            <Rectangle.OpacityMask>
+              <ImageBrush ImageSource="{Binding Source, ElementName=LogoImage}" Stretch="Fill"/>
+            </Rectangle.OpacityMask>
+          </Rectangle>
           <TextBlock x:Name="LogoText" Text="SIMRACE" FontSize="30" FontWeight="SemiBold" VerticalAlignment="Center" Visibility="Collapsed"/>
         </Grid>
 
@@ -4433,11 +4446,12 @@ function Set-HudOutline($Label, $Outline) {
           <StackPanel Orientation="Horizontal">
             <StackPanel Orientation="Horizontal" Margin="0,0,56,0">
               <Viewbox Width="50" Height="50" Margin="0,0,18,0" VerticalAlignment="Center"><Canvas Width="48" Height="48">
+                <Ellipse Width="48" Height="48" Fill="{StaticResource HudWhite}" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
                 <Path Style="{StaticResource FeatureIcon}" Data="M4,19 L24,10 L44,19 L24,28 Z M12,23 V33 C12,36 18,39 24,39 C30,39 36,36 36,33 V23 M44,19 V32 M45.6,34.5 A1.6,1.6 0 1 0 42.4,34.5 A1.6,1.6 0 1 0 45.6,34.5"/>
               </Canvas></Viewbox>
               <Border BorderBrush="{StaticResource Divider}" BorderThickness="1,0,0,0" Padding="18,0,0,0">
                 <StackPanel>
-                  <TextBlock Style="{StaticResource FeatureTitle}" Text="ОБУЧЕНИЕ"/>
+                  <TextBlock Style="{StaticResource FeatureTitle}" Text="ОБУЧЕНИЕ" Foreground="{StaticResource HudPink}"/>
                   <TextBlock Style="{StaticResource FeatureText}" Text="КОЛЬЦЕВЫЕ ГОНКИ&#10;И ДРИФТ С ИНСТРУКТОРОМ"/>
                 </StackPanel>
               </Border>
@@ -4445,11 +4459,12 @@ function Set-HudOutline($Label, $Outline) {
             <Border BorderBrush="{StaticResource Divider}" BorderThickness="1,0,0,0" Padding="56,0,56,0">
               <StackPanel Orientation="Horizontal">
                 <Viewbox Width="50" Height="50" Margin="0,0,18,0" VerticalAlignment="Center"><Canvas Width="48" Height="48">
+                  <Ellipse Width="48" Height="48" Fill="{StaticResource HudWhite}" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
                   <Path Style="{StaticResource FeatureIcon}" Data="M14,7 H34 V19 C34,26 30,31 24,31 C18,31 14,26 14,19 Z M14,11 H6 C6,19 9,24 15,25 M34,11 H42 C42,19 39,24 33,25 M24,31 V38 M16,41 H32 M18,41 C18,39 20,38 24,38 C28,38 30,39 30,41"/>
                 </Canvas></Viewbox>
                 <Border BorderBrush="{StaticResource Divider}" BorderThickness="1,0,0,0" Padding="18,0,0,0">
                   <StackPanel>
-                    <TextBlock Style="{StaticResource FeatureTitle}" Text="ТУРНИРЫ"/>
+                    <TextBlock Style="{StaticResource FeatureTitle}" Text="ТУРНИРЫ" Foreground="{StaticResource HudAmber}"/>
                     <TextBlock Style="{StaticResource FeatureText}" Text="РЕГУЛЯРНЫЕ ЧЕМПИОНАТЫ&#10;И ГОНОЧНОЕ СООБЩЕСТВО"/>
                   </StackPanel>
                 </Border>
@@ -4458,11 +4473,12 @@ function Set-HudOutline($Label, $Outline) {
             <Border BorderBrush="{StaticResource Divider}" BorderThickness="1,0,0,0" Padding="56,0,0,0">
               <StackPanel Orientation="Horizontal">
                 <Viewbox Width="50" Height="50" Margin="0,0,18,0" VerticalAlignment="Center"><Canvas Width="48" Height="48">
+                  <Ellipse Width="48" Height="48" Fill="{StaticResource HudWhite}" Stroke="{StaticResource HudInk}" StrokeThickness="2"/>
                   <Path Style="{StaticResource FeatureIcon}" Data="M30.5,15 A6.5,6.5 0 1 0 17.5,15 A6.5,6.5 0 1 0 30.5,15 M12,39 C12,31 17,26 24,26 C31,26 36,31 36,39 Z M14.5,20 A4.5,4.5 0 1 0 5.5,20 A4.5,4.5 0 1 0 14.5,20 M3,37 C3,31 6,28 11,28 M42.5,20 A4.5,4.5 0 1 0 33.5,20 A4.5,4.5 0 1 0 42.5,20 M45,37 C45,31 42,28 37,28"/>
                 </Canvas></Viewbox>
                 <Border BorderBrush="{StaticResource Divider}" BorderThickness="1,0,0,0" Padding="18,0,0,0">
                   <StackPanel>
-                    <TextBlock Style="{StaticResource FeatureTitle}" Text="МЕРОПРИЯТИЯ"/>
+                    <TextBlock Style="{StaticResource FeatureTitle}" Text="МЕРОПРИЯТИЯ" Foreground="{StaticResource HudBlue}"/>
                     <TextBlock Style="{StaticResource FeatureText}" Text="ДНИ РОЖДЕНИЯ, КОРПОРАТИВЫ&#10;И ЧАСТНЫЕ СОБЫТИЯ"/>
                   </StackPanel>
                 </Border>
@@ -4560,41 +4576,31 @@ function Set-HudOutline($Label, $Outline) {
         </ScrollViewer>
         <Button x:Name="BtnScrollLeft" Content="‹" Style="{StaticResource ScrollArrow}" HorizontalAlignment="Left" Margin="6,0,0,0" Visibility="Collapsed"/>
         <Button x:Name="BtnScrollRight" Content="›" Style="{StaticResource ScrollArrow}" HorizontalAlignment="Right" Margin="0,0,6,0" Visibility="Collapsed"/>
-        <Border x:Name="SessionStart" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Width="710"
-                BorderBrush="{StaticResource HudInk}" BorderThickness="4" CornerRadius="14" Padding="42,24,42,24">
-          <Border.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-              <GradientStop Color="#F0131524" Offset="0"/>
-              <GradientStop Color="#F0272033" Offset="1"/>
-            </LinearGradientBrush>
-          </Border.Background>
-          <StackPanel>
+        <Border x:Name="SessionStart" HorizontalAlignment="Stretch" VerticalAlignment="Center" Visibility="Collapsed" Margin="78,0,28,0">
+          <StackPanel HorizontalAlignment="Left" MaxWidth="678">
             <Grid>
-              <TextBlock x:Name="WelcomeLabel" Text="ДОБРО ПОЖАЛОВАТЬ В" FontFamily="{DynamicResource DisplayFont}" FontSize="28"
-                         TextAlignment="Center" Foreground="{StaticResource HudWhite}"/>
-              <Path x:Name="WelcomeOutline" Style="{StaticResource HudOutline}" Fill="{StaticResource HudWhite}" StrokeThickness="4"/>
+              <TextBlock x:Name="WelcomeLabel" Text="ДОБРО ПОЖАЛОВАТЬ&#10;В SIMRACE" FontFamily="{DynamicResource DisplayFont}" FontSize="48"
+                         TextWrapping="Wrap" Foreground="{StaticResource HudYellow}"/>
+              <Image x:Name="WelcomeArt" HorizontalAlignment="Left" MaxWidth="678" MaxHeight="196" Stretch="Uniform" Visibility="Collapsed"
+                     AutomationProperties.Name="Добро пожаловать в SIMRACE"/>
             </Grid>
-            <Grid Margin="0,5,0,0">
-              <TextBlock x:Name="BrandLabel" Text="SIMRACE" FontFamily="{DynamicResource DisplayFont}" FontSize="86"
-                         TextAlignment="Center" Foreground="{StaticResource HudYellow}"/>
-              <Path x:Name="BrandOutline" Style="{StaticResource HudOutline}" Fill="{StaticResource HudYellow}" StrokeThickness="8">
-                <Path.Effect><DropShadowEffect Color="#FF9DD5" ShadowDepth="4" Direction="270" BlurRadius="0" Opacity="0.85"/></Path.Effect>
-              </Path>
-            </Grid>
-            <TextBlock Text="Удачи в гонке!" Style="{StaticResource MenuHeading}" FontSize="19" Foreground="{StaticResource HudBlue}" TextAlignment="Center" Margin="0,11,0,17"/>
-            <Button x:Name="BtnStartSession" Width="380" HorizontalAlignment="Center" Style="{StaticResource StartButton}" AutomationProperties.Name="Начать заезд">
+            <Button x:Name="BtnStartSession" Width="284" HorizontalAlignment="Left" HorizontalContentAlignment="Stretch" Margin="4,14,0,0" Padding="13,8" Style="{StaticResource StartButton}" AutomationProperties.Name="Начать заезд">
               <DockPanel LastChildFill="True">
-                <Border Width="37" Height="37" DockPanel.Dock="Left" CornerRadius="18.5" Background="{StaticResource HudWhite}"
+                <Border Width="34" Height="34" DockPanel.Dock="Left" CornerRadius="17" Background="{StaticResource HudWhite}"
                         BorderBrush="{StaticResource HudInk}" BorderThickness="2" Margin="0,0,12,0">
                   <Canvas Width="20" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Path Data="M2,2 V20 M2,2 H18 V14 H2" Stroke="{StaticResource HudInk}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                     <Path Data="M3,3 H7 V6 H3 Z M7,6 H12 V10 H7 Z M12,3 H17 V6 H12 Z M3,10 H7 V13 H3 Z M12,10 H17 V13 H12 Z" Fill="{StaticResource HudInk}"/>
                   </Canvas>
                 </Border>
-                <TextBlock Text="НАЧАТЬ ЗАЕЗД" FontSize="25" VerticalAlignment="Center"/>
+                <TextBlock Text="›" DockPanel.Dock="Right" FontSize="24" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <Grid VerticalAlignment="Center">
+                  <TextBlock x:Name="StartLabel" Text="Начать заезд" FontSize="22" VerticalAlignment="Center"/>
+                  <Image x:Name="StartArt" Height="28" HorizontalAlignment="Left" Stretch="Uniform" Visibility="Collapsed"/>
+                </Grid>
               </DockPanel>
             </Button>
-            <TextBlock x:Name="TxtLastSession" FontSize="18" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,16,0,0"/>
+            <TextBlock x:Name="TxtLastSession" FontSize="18" Foreground="{StaticResource HudWhite}" HorizontalAlignment="Left" Margin="4,14,0,0"/>
           </StackPanel>
         </Border>
         <TextBlock x:Name="TxtEmpty" Visibility="Collapsed" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
@@ -4704,44 +4710,44 @@ function Set-HudOutline($Label, $Outline) {
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="40,0,0,28">
           <!-- Оси руля и педалей -->
-          <Border x:Name="AxesCard" Width="236" VerticalAlignment="Bottom" Margin="0,0,32,0" Background="#B3121315" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="18" Padding="18,14" ToolTipService.ShowDuration="600000">
+          <Border x:Name="AxesCard" Width="224" VerticalAlignment="Bottom" Margin="0,0,24,0" Background="#ED131217" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="4" Padding="12,10" ToolTipService.ShowDuration="600000">
             <Border.ToolTip>
               <ToolTip><TextBlock x:Name="TxtAxesRaw" FontSize="14" Text="Чтение осей..."/></ToolTip>
             </Border.ToolTip>
             <StackPanel>
-              <TextBlock Text="РУЛЬ" FontSize="12" Foreground="#A2A6AB" Margin="0,0,0,6"/>
-              <Canvas Width="196" Height="10" HorizontalAlignment="Left" Margin="0,0,0,14">
-                <Rectangle Width="196" Height="10" RadiusX="5" RadiusY="5" Fill="#26282C"/>
-                <Rectangle x:Name="BarWheel" Canvas.Left="98" Width="0" Height="10" RadiusX="3" RadiusY="3" Fill="{StaticResource Accent}"/>
-                <Rectangle Canvas.Left="97" Canvas.Top="-2" Width="2" Height="14" Fill="#A2A6AB"/>
+              <TextBlock Text="РУЛЬ" FontSize="11" FontWeight="Bold" Foreground="{StaticResource HudAmber}" Margin="0,0,0,5"/>
+              <Canvas Width="196" Height="5" HorizontalAlignment="Center" Margin="0,0,0,11">
+                <Rectangle Width="196" Height="5" RadiusX="1" RadiusY="1" Fill="#38343A"/>
+                <Rectangle x:Name="BarWheel" Canvas.Left="98" Width="0" Height="5" Fill="{StaticResource HudYellow}"/>
+                <Rectangle Canvas.Left="97" Canvas.Top="-2" Width="2" Height="9" Fill="{StaticResource HudYellow}"/>
               </Canvas>
               <UniformGrid Columns="3">
-                <StackPanel Margin="0,0,0,0">
-                <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
-                  <Rectangle x:Name="BarClutch" Fill="#A2A6AB" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
-                </Border>
-                <TextBlock Text="СЦЕПЛ." FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
-              </StackPanel>
-                <StackPanel Margin="0,0,0,0">
-                <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
-                  <Rectangle x:Name="BarBrake" Fill="#E5301A" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
-                </Border>
-                <TextBlock Text="ТОРМОЗ" FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
-              </StackPanel>
-                <StackPanel Margin="0,0,0,0">
-                <Border Width="16" Height="72" Background="#26282C" CornerRadius="5" HorizontalAlignment="Center" ClipToBounds="True">
-                  <Rectangle x:Name="BarThrottle" Fill="#37C552" Height="0" VerticalAlignment="Bottom" RadiusX="3" RadiusY="3"/>
-                </Border>
-                <TextBlock Text="ГАЗ" FontSize="12" Foreground="#A2A6AB" HorizontalAlignment="Center" Margin="0,6,0,0"/>
-              </StackPanel>
+                <StackPanel>
+                  <Border Width="11" Height="40" Background="#38343A" CornerRadius="2" HorizontalAlignment="Center" ClipToBounds="True">
+                    <Rectangle x:Name="BarClutch" Fill="{StaticResource HudWhite}" Height="0" VerticalAlignment="Bottom"/>
+                  </Border>
+                  <TextBlock Text="СЦЕПЛЕНИЕ" FontSize="10" FontWeight="Bold" Foreground="{StaticResource HudWhite}" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                </StackPanel>
+                <StackPanel>
+                  <Border Width="11" Height="40" Background="#38343A" CornerRadius="2" HorizontalAlignment="Center" ClipToBounds="True">
+                    <Rectangle x:Name="BarBrake" Fill="#D7503B" Height="0" VerticalAlignment="Bottom"/>
+                  </Border>
+                  <TextBlock Text="ТОРМОЗ" FontSize="10" FontWeight="Bold" Foreground="{StaticResource HudPink}" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                </StackPanel>
+                <StackPanel>
+                  <Border Width="11" Height="40" Background="#38343A" CornerRadius="2" HorizontalAlignment="Center" ClipToBounds="True">
+                    <Rectangle x:Name="BarThrottle" Fill="{StaticResource HudGreen}" Height="0" VerticalAlignment="Bottom"/>
+                  </Border>
+                  <TextBlock Text="ГАЗ" FontSize="10" FontWeight="Bold" Foreground="{StaticResource HudGreen}" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                </StackPanel>
               </UniformGrid>
               <Button x:Name="BtnEquipmentInfo" Content="Об оборудовании" Style="{StaticResource EquipmentButton}" FontSize="12" FontWeight="SemiBold" Margin="0,12,0,0" ToolTip="База, педали и сменные рули SIMRACE"/>
             </StackPanel>
           </Border>
           <StackPanel VerticalAlignment="Top" Margin="0,0,32,0">
-            <TextBlock Text="Большакова, 99А" FontSize="18" FontWeight="SemiBold" TextAlignment="Right"/>
+            <TextBlock Text="Большакова, 99А" FontSize="18" FontWeight="SemiBold" TextAlignment="Right" Foreground="{StaticResource HudPink}"/>
             <TextBlock Text="14 кокпитов, круглосуточно" FontSize="15" Foreground="{StaticResource Muted}" TextAlignment="Right" Margin="0,0,0,12"/>
-            <TextBlock Text="Чернышевского, 4А" FontSize="18" FontWeight="SemiBold" TextAlignment="Right"/>
+            <TextBlock Text="Чернышевского, 4А" FontSize="18" FontWeight="SemiBold" TextAlignment="Right" Foreground="{StaticResource HudBlue}"/>
             <TextBlock Text="8 кокпитов, 10:00–22:00" FontSize="15" Foreground="{StaticResource Muted}" TextAlignment="Right"/>
           </StackPanel>
           <StackPanel Width="126" Margin="0,0,18,0">
@@ -4771,17 +4777,68 @@ function Set-HudOutline($Label, $Outline) {
     </Grid>
 
     <!-- Описание игры по значку «i» -->
-    <Grid x:Name="InfoPanel" Visibility="Collapsed" Background="#B3090A0C">
-      <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="780" Background="#F7181A1C" BorderBrush="#29FFFFFF" BorderThickness="1" CornerRadius="18" Padding="48,36,48,36">
-        <Border.Effect><DropShadowEffect BlurRadius="44" ShadowDepth="0" Color="#E2450F" Opacity="0.16"/></Border.Effect>
-        <StackPanel>
-          <Rectangle Width="56" Height="3" Fill="{StaticResource Accent}" HorizontalAlignment="Left" Margin="0,0,0,18"/>
-          <TextBlock x:Name="TxtInfoTitle" Style="{StaticResource MenuHeading}" FontSize="34" Foreground="{StaticResource HudPink}" TextWrapping="Wrap" Margin="0,0,0,16"/>
-          <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,30">
-            <TextBlock x:Name="TxtInfoText" FontSize="22" LineHeight="32" Foreground="{StaticResource Soft}" TextWrapping="Wrap"/>
-          </ScrollViewer>
-          <Button x:Name="BtnInfoOk" Content="Понятно" Style="{StaticResource StartButton}" FontSize="22" MinWidth="200" HorizontalAlignment="Left"/>
-        </StackPanel>
+    <Grid x:Name="InfoPanel" Visibility="Collapsed" Background="#B80C0A10">
+      <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="740" MaxWidth="{Binding ActualWidth, ElementName=InfoPanel}"
+              Background="#FF141316" BorderBrush="#55FFFFFF" BorderThickness="1,0,1,1">
+        <Border.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="6" Opacity="0.5"/></Border.Effect>
+        <Grid ClipToBounds="True">
+          <Border Width="430" HorizontalAlignment="Right" Opacity="0.36" IsHitTestVisible="False">
+            <Border.Background>
+              <ImageBrush ImageSource="{Binding Source, ElementName=BackgroundImage}" Stretch="UniformToFill" AlignmentX="Right"/>
+            </Border.Background>
+          </Border>
+          <Border IsHitTestVisible="False">
+            <Border.Background>
+              <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                <GradientStop Offset="0.32" Color="#FF141316"/>
+                <GradientStop Offset="0.67" Color="#EB141316"/>
+                <GradientStop Offset="1" Color="#66141316"/>
+              </LinearGradientBrush>
+            </Border.Background>
+          </Border>
+          <Rectangle Height="3" VerticalAlignment="Top" Fill="{StaticResource HudYellow}" IsHitTestVisible="False"/>
+          <StackPanel Margin="35,28,35,24">
+            <TextBlock x:Name="InfoLabel" Text="ОБ ИГРЕ" FontSize="14" FontWeight="Bold" Foreground="{StaticResource HudYellow}" Margin="0,0,0,10"/>
+            <Grid Margin="0,0,0,18">
+              <TextBlock x:Name="TxtInfoTitle" Style="{StaticResource MenuHeading}" FontSize="38" Foreground="{StaticResource HudWhite}" TextWrapping="Wrap"/>
+              <Image x:Name="InfoTitleArt" MaxHeight="100" MaxWidth="560" HorizontalAlignment="Left" Stretch="Uniform" Visibility="Collapsed"/>
+            </Grid>
+            <ScrollViewer MaxHeight="330" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,18">
+              <Grid>
+                <TextBlock x:Name="TxtInfoText" FontSize="18" LineHeight="28" Foreground="{StaticResource HudWhite}" TextWrapping="Wrap"/>
+                <StackPanel x:Name="EquipmentDetails" Visibility="Collapsed">
+                  <Border BorderThickness="0,1,0,0" BorderBrush="{StaticResource Divider}" Padding="0,10">
+                    <StackPanel>
+                      <TextBlock Text="MOZA R9 V3 · база" FontSize="18" FontWeight="Bold" Foreground="{StaticResource HudAmber}"/>
+                      <TextBlock Text="Прямой привод передаёт усилие на руль. На нём чувствуются поребрики, нагрузка в повороте и потеря сцепления."
+                                 FontSize="16" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                  </Border>
+                  <Border BorderThickness="0,1,0,0" BorderBrush="{StaticResource Divider}" Padding="0,10">
+                    <StackPanel>
+                      <TextBlock Text="MOZA CRP2 · педали" FontSize="18" FontWeight="Bold" Foreground="{StaticResource HudPink}"/>
+                      <TextBlock Text="Тормоз измеряет силу нажатия. Это помогает повторять одно и то же торможение круг за кругом."
+                                 FontSize="16" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                  </Border>
+                  <Border BorderThickness="0,1,0,0" BorderBrush="{StaticResource Divider}" Padding="0,10">
+                    <StackPanel>
+                      <TextBlock Text="Сменные рули" FontSize="18" FontWeight="Bold" Foreground="{StaticResource HudBlue}"/>
+                      <TextBlock Text="MOZA KS для формул и GT, круглый MOZA CS для разных дисциплин и Nardi для дрифта."
+                                 FontSize="16" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Text="Сменить руль или настроить посадку поможет администратор." FontSize="14"
+                             Foreground="{StaticResource Soft}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                </StackPanel>
+              </Grid>
+            </ScrollViewer>
+            <Border BorderThickness="0,1,0,0" BorderBrush="{StaticResource Divider}" Padding="0,15,0,0">
+              <Button x:Name="BtnInfoOk" Content="Понятно  ›" AutomationProperties.Name="Понятно" Style="{StaticResource ActionButton}"
+                      FontSize="17" MinWidth="136" HorizontalAlignment="Right" Padding="14,8"/>
+            </Border>
+          </StackPanel>
+        </Grid>
       </Border>
     </Grid>
 
@@ -5130,6 +5187,7 @@ try {
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
     foreach ($name in 'BackgroundImage', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
+                      'SunsetShade', 'WelcomeArt', 'WelcomeLabel', 'StartArt', 'StartLabel', 'InfoLabel', 'InfoTitleArt', 'EquipmentDetails',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
@@ -5145,7 +5203,8 @@ try {
     Initialize-Axes
     Start-AgentPoller
     Start-DeviceWatch
-    [void](Set-ImageFile $BackgroundImage 'background.jpg')
+    if (Set-ImageFile $BackgroundImage 'hud\sunset.jpg') { $SunsetShade.Visibility = 'Visible' }
+    else { [void](Set-ImageFile $BackgroundImage 'background.jpg') }
     [void](Set-ImageFile $DashImage 'dash.png')
     [void](Set-ImageFile $DashOffImage 'dash-off.png')
     [void](Set-ImageFile $QrTelegram 'qr-telegram.png')
@@ -5160,8 +5219,8 @@ try {
     if (Test-Path -LiteralPath (Join-Path $script:Root 'fonts\RussoOne-Regular.ttf')) {
         $Window.Resources['MenuFont'] = [System.Windows.Media.FontFamily]::new($fontsUri, './#Russo One')
     }
-    Set-HudOutline ($Window.FindName('WelcomeLabel')) ($Window.FindName('WelcomeOutline'))
-    Set-HudOutline ($Window.FindName('BrandLabel')) ($Window.FindName('BrandOutline'))
+    Set-HudLettering $WelcomeLabel $WelcomeArt 'hud\welcome.png'
+    Set-HudLettering $StartLabel $StartArt 'hud\start.png'
     $script:DashFont = New-Object System.Windows.Media.FontFamily($fontsUri, './#Barlow Medium')
     # Race Position: номер компьютера из имени, например simrace-2 это 2
     $number = [regex]::Match($env:COMPUTERNAME, '(\d+)$')

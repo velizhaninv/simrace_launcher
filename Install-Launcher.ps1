@@ -258,8 +258,10 @@ if (Test-Path -LiteralPath $imagesSource) {
     }
 }
 
-$fontsSource = Join-Path $PSScriptRoot 'fonts'
-if (Test-Path -LiteralPath $fontsSource) { Copy-Item -LiteralPath $fontsSource -Destination $target -Recurse -Force }
+foreach ($assetFolder in 'fonts', 'hud') {
+    $assetSource = Join-Path $PSScriptRoot $assetFolder
+    if (Test-Path -LiteralPath $assetSource) { Copy-Item -LiteralPath $assetSource -Destination $target -Recurse -Force }
+}
 
 $shortcutsSource = Join-Path $PSScriptRoot 'shortcuts'
 if (Test-Path -LiteralPath $shortcutsSource) {
