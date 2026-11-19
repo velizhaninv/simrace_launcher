@@ -2186,13 +2186,44 @@ function Update-TimerDisplay {
     }
 }
 
-# Без начатого сеанса обложки едва видны за приветствием и недоступны для запуска.
+function Update-WelcomeFooter {
+    $idle = $script:TimerState -eq 'idle'
+    $runningGame = $GameBar.Visibility -eq 'Visible'
+    $SelectedInfo.Visibility = $(if ($idle -or $runningGame) { 'Collapsed' } else { 'Visible' })
+    $WelcomePortrait.Visibility = $(if ($idle -and -not $runningGame -and $WelcomePortraitImage.Source) { 'Visible' } else { 'Collapsed' })
+    $GameShortcutHint.Visibility = $(if ($idle) { 'Collapsed' } else { 'Visible' })
+}
+
+function Set-WelcomeCoverPreview([bool]$Enabled) {
+    if (-not $Enabled -or -not [System.Windows.SystemParameters]::ClientAreaAnimation) {
+        if ($TileScroller.OpacityMask) {
+            $TileScroller.OpacityMask.RelativeTransform.BeginAnimation([System.Windows.Media.TranslateTransform]::XProperty, $null)
+            $TileScroller.OpacityMask = $null
+        }
+        $RowsPanel.Opacity = $(if ($Enabled) { 0.20 } else { 1 })
+        return
+    }
+    $RowsPanel.Opacity = 1
+    if ($TileScroller.OpacityMask) { return }
+    # Движущаяся маска осветляет сами обложки, не рисуя поверх них белую полосу.
+    $mask = $Window.FindResource('WelcomeCoverMask').Clone()
+    $TileScroller.OpacityMask = $mask
+    $sweep = [System.Windows.Media.Animation.DoubleAnimationUsingKeyFrames]::new()
+    $sweep.Duration = [System.Windows.Duration]::new([TimeSpan]::FromSeconds(10))
+    $sweep.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+    [void]$sweep.KeyFrames.Add([System.Windows.Media.Animation.LinearDoubleKeyFrame]::new(-0.28, [System.Windows.Media.Animation.KeyTime]::FromTimeSpan([TimeSpan]::FromSeconds(1))))
+    [void]$sweep.KeyFrames.Add([System.Windows.Media.Animation.LinearDoubleKeyFrame]::new(1, [System.Windows.Media.Animation.KeyTime]::FromTimeSpan([TimeSpan]::FromSeconds(6))))
+    $mask.RelativeTransform.BeginAnimation([System.Windows.Media.TranslateTransform]::XProperty, $sweep)
+}
+
+# Обложки остаются видны на приветствии, но выбор игры доступен только после старта.
 function Update-TimerLayout {
     $idle = $script:TimerState -eq 'idle'
     $SessionStart.Visibility = $(if ($idle) { 'Visible' } else { 'Collapsed' })
     $SessionFields.Visibility = $(if ($idle) { 'Collapsed' } else { 'Visible' })
     $RowsPanel.IsEnabled = -not $idle
-    $RowsPanel.Opacity = $(if ($idle) { 0.05 } else { 1 })
+    Set-WelcomeCoverPreview $idle
+    Update-WelcomeFooter
     Update-ScrollArrows
     $IconPause.Data = [System.Windows.Media.Geometry]::Parse($(if ($script:TimerState -eq 'paused') { 'M8,5 L18,12 L8,19 Z' } else { 'M8,5 V19 M16,5 V19' }))
     $BtnPause.ToolTip = $(if ($script:TimerState -eq 'paused') { 'Продолжить' } else { 'Пауза' })
@@ -3144,8 +3175,8 @@ function Show-GameBar {
         if ($coverImage) { $ImgRunning.Source = $coverImage.Source }
     }
     $Overlay.Visibility = 'Collapsed'
-    $SelectedInfo.Visibility = 'Collapsed'
     $GameBar.Visibility = 'Visible'
+    Update-WelcomeFooter
     $TilesHost.IsEnabled = $false
     $TilesHost.Opacity = 0.35
     [SimraceNative]::SetBackground($false)      # теперь окно можно активировать, в том числе через Alt+Tab
@@ -3155,7 +3186,7 @@ function Show-GameBar {
 function Hide-GameBar {
     $SheenHost.Visibility = 'Visible'
     $GameBar.Visibility = 'Collapsed'
-    $SelectedInfo.Visibility = 'Visible'
+    Update-WelcomeFooter
     $TilesHost.IsEnabled = $true
     $TilesHost.Opacity = 1
     [SimraceNative]::AllowSwitching = $false
@@ -4016,6 +4047,14 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
     <SolidColorBrush x:Key="HudBlue" Color="#A9DEF0"/>
     <SolidColorBrush x:Key="HudPink" Color="#F7AFCC"/>
     <SolidColorBrush x:Key="HudGreen" Color="#B6D99B"/>
+    <LinearGradientBrush x:Key="WelcomeCoverMask" StartPoint="0,0" EndPoint="0.28,0" SpreadMethod="Pad">
+      <LinearGradientBrush.RelativeTransform><TranslateTransform X="-0.28"/></LinearGradientBrush.RelativeTransform>
+      <GradientStop Color="#33FFFFFF" Offset="0"/>
+      <GradientStop Color="#42FFFFFF" Offset="0.20"/>
+      <GradientStop Color="#70FFFFFF" Offset="0.49"/>
+      <GradientStop Color="#49FFFFFF" Offset="0.74"/>
+      <GradientStop Color="#33FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
     <SolidColorBrush x:Key="DashTurquoise" Color="#9CE8DE"/>
     <Geometry x:Key="DashPalm">M23,11 C18,5 11,6 4,13 C11,10 15,11 20,14 C13,12 8,15 5,22 C10,18 15,17 21,17 C16,20 15,24 15,29 C17,24 20,20 24,18 C25,28 21,41 17,48 L22,48 C26,40 29,28 27,18 C33,20 37,23 39,28 C39,21 36,17 30,16 C37,15 42,17 46,21 C43,13 37,11 29,13 C33,8 38,6 43,7 C36,2 29,5 26,10 C25,5 21,1 16,0 C21,4 22,7 23,11 Z</Geometry>
     <FontFamily x:Key="MenuFont">Segoe UI Semibold, Segoe UI</FontFamily>
@@ -4709,12 +4748,17 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
           </StackPanel>
         </Border>
 
+        <Border x:Name="WelcomePortrait" Visibility="Collapsed" HorizontalAlignment="Left" MaxWidth="258" MaxHeight="246"
+                BorderThickness="1" BorderBrush="#65FFD083" Background="#E0191118" CornerRadius="4"
+                ClipToBounds="True" IsHitTestVisible="False">
+          <Image x:Name="WelcomePortraitImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+        </Border>
         <StackPanel x:Name="SelectedInfo">
           <Rectangle Width="72" Height="3" Fill="{StaticResource Accent}" HorizontalAlignment="Left" Margin="0,0,0,14"/>
           <TextBlock x:Name="TxtSelected" Text="Выбери игру" Style="{StaticResource MenuHeading}" FontSize="42" TextTrimming="CharacterEllipsis"/>
           <TextBlock x:Name="TxtHint" Text="Наведи курсор на обложку" FontSize="20" Foreground="{StaticResource Muted}"/>
         </StackPanel>
-        <TextBlock Text="Свернуть игру: Ctrl+Shift+End" FontSize="15" Foreground="#7C8085" Margin="0,10,0,0"/>
+        <TextBlock x:Name="GameShortcutHint" Text="Свернуть игру: Ctrl+Shift+End" FontSize="15" Foreground="#7C8085" Margin="0,10,0,0"/>
         </StackPanel>
 
         <!-- Приборка: картинка и лампы поверх неё в одной системе координат -->
@@ -5273,7 +5317,7 @@ try {
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
     foreach ($name in 'BackgroundImage', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'LogoLettering', 'OriginalLogo', 'FeatureBox', 'ToolsPanel',
-                      'SunsetShade', 'WelcomeArt', 'WelcomeLabel', 'StartArt', 'StartLabel', 'InfoLabel', 'InfoTitleArt', 'EquipmentDetails',
+                      'SunsetShade', 'WelcomeArt', 'WelcomeLabel', 'WelcomePortrait', 'WelcomePortraitImage', 'GameShortcutHint', 'StartArt', 'StartLabel', 'InfoLabel', 'InfoTitleArt', 'EquipmentDetails',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
@@ -5309,6 +5353,7 @@ try {
         $Window.Resources['MenuFont'] = [System.Windows.Media.FontFamily]::new($fontsUri, './#Russo One')
     }
     Set-HudLettering $WelcomeLabel $WelcomeArt 'hud\welcome.png'
+    [void](Set-ImageFile $WelcomePortraitImage 'hud\welcome-portrait.png')
     Set-HudLettering $StartLabel $StartArt 'hud\start.png'
     $script:DashFont = New-Object System.Windows.Media.FontFamily($fontsUri, './#Barlow Medium')
     # Race Position: номер компьютера из имени, например simrace-2 это 2
