@@ -2185,13 +2185,13 @@ function Update-TimerDisplay {
     }
 }
 
-# Без начатого сеанса плитки неактивны и в центре большая кнопка
+# Без начатого сеанса обложки едва видны за приветствием и недоступны для запуска.
 function Update-TimerLayout {
     $idle = $script:TimerState -eq 'idle'
     $SessionStart.Visibility = $(if ($idle) { 'Visible' } else { 'Collapsed' })
     $SessionFields.Visibility = $(if ($idle) { 'Collapsed' } else { 'Visible' })
     $RowsPanel.IsEnabled = -not $idle
-    $RowsPanel.Opacity = $(if ($idle) { 0.25 } else { 1 })
+    $RowsPanel.Opacity = $(if ($idle) { 0.05 } else { 1 })
     Update-ScrollArrows
     $IconPause.Data = [System.Windows.Media.Geometry]::Parse($(if ($script:TimerState -eq 'paused') { 'M8,5 L18,12 L8,19 Z' } else { 'M8,5 V19 M16,5 V19' }))
     $BtnPause.ToolTip = $(if ($script:TimerState -eq 'paused') { 'Продолжить' } else { 'Пауза' })
@@ -3958,6 +3958,8 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
     <SolidColorBrush x:Key="HudBlue" Color="#A9DEF0"/>
     <SolidColorBrush x:Key="HudPink" Color="#F7AFCC"/>
     <SolidColorBrush x:Key="HudGreen" Color="#B6D99B"/>
+    <SolidColorBrush x:Key="DashTurquoise" Color="#9CE8DE"/>
+    <Geometry x:Key="DashPalm">M23,11 C18,5 11,6 4,13 C11,10 15,11 20,14 C13,12 8,15 5,22 C10,18 15,17 21,17 C16,20 15,24 15,29 C17,24 20,20 24,18 C25,28 21,41 17,48 L22,48 C26,40 29,28 27,18 C33,20 37,23 39,28 C39,21 36,17 30,16 C37,15 42,17 46,21 C43,13 37,11 29,13 C33,8 38,6 43,7 C36,2 29,5 26,10 C25,5 21,1 16,0 C21,4 22,7 23,11 Z</Geometry>
     <FontFamily x:Key="MenuFont">Segoe UI Semibold, Segoe UI</FontFamily>
     <FontFamily x:Key="DisplayFont">Arial Black, Segoe UI</FontFamily>
 
@@ -4424,14 +4426,18 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
       <!-- Логотип и кнопки по краям, блок с направлениями точно по центру экрана -->
       <Grid Grid.Row="0">
         <Grid x:Name="LogoHost" HorizontalAlignment="Left" VerticalAlignment="Center">
-          <Image x:Name="LogoImage" Stretch="Uniform" Height="54" HorizontalAlignment="Left" Opacity="0"/>
-          <Rectangle Width="{Binding ActualWidth, ElementName=LogoImage}" Height="{Binding ActualHeight, ElementName=LogoImage}"
-                     Fill="{StaticResource HudWhite}" HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False">
-            <Rectangle.OpacityMask>
-              <ImageBrush ImageSource="{Binding Source, ElementName=LogoImage}" Stretch="Fill"/>
-            </Rectangle.OpacityMask>
-          </Rectangle>
-          <TextBlock x:Name="LogoText" Text="SIMRACE" FontSize="30" FontWeight="SemiBold" VerticalAlignment="Center" Visibility="Collapsed"/>
+          <Image x:Name="LogoLettering" Stretch="Uniform" MaxWidth="227" MaxHeight="62" HorizontalAlignment="Left"
+                 VerticalAlignment="Center" Visibility="Collapsed" AutomationProperties.Name="SIMRACE"/>
+          <Grid x:Name="OriginalLogo">
+            <Image x:Name="LogoImage" Stretch="Uniform" Height="54" HorizontalAlignment="Left" Opacity="0"/>
+            <Rectangle Width="{Binding ActualWidth, ElementName=LogoImage}" Height="{Binding ActualHeight, ElementName=LogoImage}"
+                       Fill="{StaticResource HudWhite}" HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False">
+              <Rectangle.OpacityMask>
+                <ImageBrush ImageSource="{Binding Source, ElementName=LogoImage}" Stretch="Fill"/>
+              </Rectangle.OpacityMask>
+            </Rectangle>
+            <TextBlock x:Name="LogoText" Text="SIMRACE" FontSize="30" FontWeight="SemiBold" VerticalAlignment="Center" Visibility="Collapsed"/>
+          </Grid>
         </Grid>
 
         <!-- Интересный факт: показывается, только если рядом с логотипом хватает места -->
@@ -4658,7 +4664,29 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
           <Grid Width="1520" Height="500">
             <Image x:Name="DashImage" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/>
             <Canvas x:Name="DashLive" IsHitTestVisible="False">
-              <TextBlock x:Name="TxtDashTimer" Canvas.Left="920" Canvas.Top="226" Width="320" TextAlignment="Center" FontSize="48" Foreground="#E0E2E2" Text="--:--:--"/>
+              <!-- Декор находится под слоем выключенной приборки и не перекрывает показания. -->
+              <Border Canvas.Left="92" Canvas.Top="390" Width="1336" Height="68" CornerRadius="4" BorderThickness="0,1,0,0" BorderBrush="#508EE0D5">
+                <Border.Background>
+                  <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                    <GradientStop Color="#55235559" Offset="0"/>
+                    <GradientStop Color="#220C2F32" Offset="0.48"/>
+                    <GradientStop Color="#553F2940" Offset="1"/>
+                  </LinearGradientBrush>
+                </Border.Background>
+              </Border>
+              <Path Canvas.Left="124" Canvas.Top="398" Width="50" Height="51" Stretch="Uniform"
+                    Data="{StaticResource DashPalm}" Fill="{StaticResource DashTurquoise}" Opacity="0.64"/>
+              <Path Canvas.Left="180" Canvas.Top="411" Width="36" Height="38" Stretch="Uniform"
+                    Data="{StaticResource DashPalm}" Fill="{StaticResource DashTurquoise}" Opacity="0.31"/>
+              <Path Canvas.Left="1338" Canvas.Top="398" Width="50" Height="51" Stretch="Uniform" RenderTransformOrigin="0.5,0.5"
+                    Data="{StaticResource DashPalm}" Fill="{StaticResource HudPink}" Opacity="0.58">
+                <Path.RenderTransform><ScaleTransform ScaleX="-1"/></Path.RenderTransform>
+              </Path>
+              <Path Canvas.Left="1294" Canvas.Top="411" Width="36" Height="38" Stretch="Uniform" RenderTransformOrigin="0.5,0.5"
+                    Data="{StaticResource DashPalm}" Fill="{StaticResource HudPink}" Opacity="0.31">
+                <Path.RenderTransform><ScaleTransform ScaleX="-1"/></Path.RenderTransform>
+              </Path>
+              <TextBlock x:Name="TxtDashTimer" Canvas.Left="920" Canvas.Top="226" Width="320" TextAlignment="Center" FontSize="48" Foreground="{StaticResource DashTurquoise}" Text="--:--:--"/>
               <TextBlock x:Name="TxtDashStart" Canvas.Left="920" Canvas.Top="322" Width="158" TextAlignment="Center" FontSize="27" Foreground="#E0E2E2" Text="--:--"/>
               <TextBlock x:Name="TxtDashState" Canvas.Left="1082" Canvas.Top="322" Width="158" TextAlignment="Center" FontSize="27" Foreground="#E0E2E2" Text="IDLE"/>
               <TextBlock x:Name="TxtDashPosition" Canvas.Left="400" Canvas.Top="138" Width="180" TextAlignment="Right" FontSize="27" Foreground="#E0E2E2"/>
@@ -4666,9 +4694,9 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
               <TextBlock x:Name="TxtDashText" Canvas.Left="90" Canvas.Top="405" Width="1340" TextAlignment="Center" FontSize="38">
                 <TextBlock.Foreground>
                   <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                    <GradientStop Color="#D5552A" Offset="0.3"/>
-                    <GradientStop Color="#EA7440" Offset="0.5"/>
-                    <GradientStop Color="#D5552A" Offset="0.7"/>
+                    <GradientStop Color="#71CFC8" Offset="0.16"/>
+                    <GradientStop Color="#C3F7EF" Offset="0.54"/>
+                    <GradientStop Color="#E7A4C9" Offset="0.9"/>
                   </LinearGradientBrush>
                 </TextBlock.Foreground>
               </TextBlock>
@@ -5186,7 +5214,7 @@ try {
     $script:GearButton = $null
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-    foreach ($name in 'BackgroundImage', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'FeatureBox', 'ToolsPanel',
+    foreach ($name in 'BackgroundImage', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'LogoLettering', 'OriginalLogo', 'FeatureBox', 'ToolsPanel',
                       'SunsetShade', 'WelcomeArt', 'WelcomeLabel', 'StartArt', 'StartLabel', 'InfoLabel', 'InfoTitleArt', 'EquipmentDetails',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
@@ -5197,8 +5225,11 @@ try {
         Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
     }
 
-    # Логотип вырезан из фирменной обоины без перерисовки. Если файла нет, выводим название текстом.
-    if (-not (Set-ImageFile $LogoImage 'logo.png' 600)) { $LogoText.Visibility = 'Visible' }
+    if (Set-ImageFile $LogoLettering 'hud\logo.png') {
+        $LogoLettering.Visibility = 'Visible'
+        $OriginalLogo.Visibility = 'Collapsed'
+    }
+    elseif (-not (Set-ImageFile $LogoImage 'logo.png' 600)) { $LogoText.Visibility = 'Visible' }
     Initialize-Facts
     Initialize-Axes
     Start-AgentPoller
