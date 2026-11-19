@@ -40,7 +40,7 @@
   .vol:hover { background:var(--soft); }
   .vol:disabled { opacity:.3; cursor:default; }
   .status { color:var(--muted); margin:12px 2px; min-height:20px; }
-  .actions { display:grid; grid-template-columns:repeat(7, 1fr); gap:10px; }
+  .actions { display:grid; grid-template-columns:repeat(8, minmax(0, 1fr)); gap:10px; }
   .btn { height:46px; border-radius:10px; border:1px solid #2e3135; background:var(--soft); font-weight:600; }
   .btn:hover { border-color:var(--accent); }
   .btn.primary { background:#d23f0d; border-color:#d23f0d; }
@@ -88,6 +88,7 @@
   <div class="status" id="status"></div>
   <div class="actions">
     <button class="btn primary" data-action="update">Обновить лаунчер</button>
+    <button class="btn" data-action="minimize-launcher">Свернуть лаунчер</button>
     <button class="btn danger" data-action="end-session">Завершить сеанс</button>
     <button class="btn" data-action="lock">Заблокировать</button>
     <button class="btn danger" data-action="unlock">Разблокировать</button>
@@ -120,7 +121,8 @@ const ICONS = {
 };
 const COMMANDS = {
   update:   { verb: 'Обновить лаунчер на', note: 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.', done: 'обновятся' },
-  'end-session': { verb: 'Завершить сеанс на', note: 'Запущенная игра закроется. Уже поставленная в очередь команда продолжится после завершения.' },
+  'end-session': { verb: 'Завершить сеанс на', note: 'Запущенная игра закроется. Уже поставленная в очередь команда продолжится после завершения.', immediate: true },
+  'minimize-launcher': { verb: 'Свернуть лаунчер на', note: 'Лаунчер свернётся сразу. Текущий сеанс и запущенная игра продолжатся.', immediate: true },
   lock:     { verb: 'Заблокировать', note: 'Включится защита UWF, компьютеры перезагрузятся.', done: 'заблокируются' },
   unlock:   { verb: 'РАЗБЛОКИРОВАТЬ', note: 'Защита выключится. Пока она выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать обратно.', done: 'разблокируются' },
   reboot:   { verb: 'Перезагрузить', note: 'Компьютеры перезагрузятся.', done: 'перезагрузятся' },
@@ -199,6 +201,9 @@ function render() {
       default: now = game ? `игра: ${game}` : d.busy || 'свободен';
     }
     nowColor = d.state && d.state !== 'idle' ? 'var(--amber)' : game ? '#fff' : d.busy ? '#b4b8bc' : 'var(--green)';
+    if (d.launcherMinimizing) { now = 'сворачивается лаунчер'; nowColor = 'var(--amber)'; }
+    else if (d.minimizeError) { now = d.minimizeError; nowColor = '#ff6a55'; }
+    else if (d.launcherMinimized) { now = now === 'свободен' ? 'лаунчер свёрнут' : `${now} · лаунчер свёрнут`; }
     if (d.endingSession) { now = 'завершается сеанс'; nowColor = 'var(--amber)'; }
     if (d.message && d.updateOk === false) { now = d.message; nowColor = '#ff6a55'; }
     rows.push(`<tr>
@@ -253,7 +258,7 @@ async function runCommand(action) {
   if (fresh.length) {
     const busyNames = fresh.filter(n => state.rows[n] && state.rows[n].busy);
     let question = `${text.verb}: ${fresh.join(', ')}?\n\n${text.note}`;
-    if (action !== 'end-session' && busyNames.length) question += `\n\nСейчас заняты: ${busyNames.join(', ')}. Они ${text.done}, когда закончится сеанс.`;
+    if (!text.immediate && busyNames.length) question += `\n\nСейчас заняты: ${busyNames.join(', ')}. Они ${text.done}, когда закончится сеанс.`;
     if (!confirm(question)) return;
   }
   setBusy(true);

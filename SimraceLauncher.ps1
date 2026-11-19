@@ -1940,16 +1940,21 @@ function Update-Proportions {
     $BottomRow.Height = New-Object System.Windows.GridLength($bottom)
     $DashHost.Height = $bottom
     $DashHost.Width = $bottom * 1520 / 500
-    $portraitLeft = [Math]::Round($width * 0.12)
-    $portraitSpace = [Math]::Max(0, ($width - $DashHost.Width) / 2 - $portraitLeft - 24)
-    $WelcomePortraitImage.Margin = [System.Windows.Thickness]::new($portraitLeft, 0, 0, 0)
-    $WelcomePortraitImage.Height = [Math]::Min([Math]::Round($height * 0.32), $portraitSpace)
     $TxtSelected.FontSize = $(if ($wide) { 42 } else { 34 })
     # На узком экране у кнопок остаются только значки
     foreach ($label in $script:ToolLabels) { $label.Visibility = $(if ($wide) { 'Visible' } else { 'Collapsed' }) }
     # На узком экране мини-дашборду нет места рядом с адресами
     $AxesCard.Visibility = $(if ($wide -and $script:Config.showAxes -ne $false) { 'Visible' } else { 'Collapsed' })
     Update-FeatureWidth
+}
+
+function Update-WelcomePortraitSize {
+    if ($SessionStart.Visibility -ne 'Visible' -or $SessionStart.ActualHeight -le 0 -or -not $WelcomePortraitImage.Source) { return }
+    $anchor = $SessionStart.TranslatePoint([System.Windows.Point]::new(0, $SessionStart.ActualHeight), $Window)
+    $spaceBelow = $Window.ActualHeight - $anchor.Y - 14
+    $spaceBesideDash = ($Window.ActualWidth - $DashHost.ActualWidth) / 2 - $anchor.X - 24
+    $maxHeight = [Math]::Round($Window.ActualHeight * 0.39)
+    $WelcomePortraitImage.Height = [Math]::Max(0, [Math]::Min($maxHeight, [Math]::Min($spaceBelow, $spaceBesideDash)))
 }
 
 # ---------- Подключение устройств ----------
@@ -2213,7 +2218,7 @@ function Set-WelcomeCoverPreview([bool]$Enabled) {
     $mask = $Window.FindResource('WelcomeCoverMask').Clone()
     $TileScroller.OpacityMask = $mask
     $sweep = [System.Windows.Media.Animation.DoubleAnimationUsingKeyFrames]::new()
-    $sweep.Duration = [System.Windows.Duration]::new([TimeSpan]::FromSeconds(10))
+    $sweep.Duration = [System.Windows.Duration]::new([TimeSpan]::FromSeconds(8))
     $sweep.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
     [void]$sweep.KeyFrames.Add([System.Windows.Media.Animation.LinearDoubleKeyFrame]::new(-0.28, [System.Windows.Media.Animation.KeyTime]::FromTimeSpan([TimeSpan]::FromSeconds(1))))
     [void]$sweep.KeyFrames.Add([System.Windows.Media.Animation.LinearDoubleKeyFrame]::new(1, [System.Windows.Media.Animation.KeyTime]::FromTimeSpan([TimeSpan]::FromSeconds(6))))
@@ -3715,6 +3720,8 @@ $script:VolumeAck = ''
 $script:RemoteSessionEnd = $null
 $script:RemoteSessionAck = ''
 $script:RemoteSessionError = ''
+$script:MinimizeAck = ''
+$script:MinimizeError = ''
 $script:HealthNet = ''
 $script:HealthInternet = $null
 $script:HealthVpn = ''
@@ -3768,11 +3775,29 @@ function Update-RemoteSessionEnd($Command) {
     }
 }
 
+function Update-RemoteLauncherMinimize($Command) {
+    $id = [string]$Command.id
+    if (-not $id -or $id -eq $script:MinimizeAck) { return }
+    $expires = 0L
+    if (-not [long]::TryParse([string]$Command.expires, [ref]$expires) -or [datetime]::UtcNow.Ticks -ge $expires) { return }
+    $script:MinimizeAck = $id
+    $script:MinimizeError = ''
+    try {
+        if (-not $script:ServiceMode -or $Window.WindowState -ne 'Minimized') { Enter-ServiceMode }
+        if ($Window.WindowState -ne 'Minimized') { throw 'Окно осталось открытым.' }
+    }
+    catch {
+        $script:MinimizeError = "Не удалось свернуть лаунчер: $($_.Exception.Message)"
+        Write-Log $script:MinimizeError
+    }
+}
+
 function Update-AgentReport {
     if (-not $script:AgentShared) { return }
     # Сначала применяем громкость, если её прислали с SIMRACE-14
     $status = Get-AgentShared 'Status'
     Update-RemoteSessionEnd $status.endSession
+    Update-RemoteLauncherMinimize $status.minimizeLauncher
     if ($status -and $status.volume -and [string]$status.volume.id -ne $script:VolumeAck -and $script:AudioReady) {
         $command = $status.volume
         try {
@@ -3802,6 +3827,9 @@ function Update-AgentReport {
         endSessionTarget = Get-EndSessionTarget
         endSessionAck = $script:RemoteSessionAck
         endSessionError = $script:RemoteSessionError
+        launcherMinimized = [bool]($script:ServiceMode -and $Window.WindowState -eq 'Minimized')
+        minimizeAck = $script:MinimizeAck
+        minimizeError = $script:MinimizeError
         net = [string]$script:HealthNet
         internet = $script:HealthInternet
         vpn = [string]$script:HealthVpn
@@ -4505,10 +4533,6 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
       </Border>
     </Border>
 
-    <Image x:Name="WelcomePortraitImage" Visibility="Collapsed" IsHitTestVisible="False"
-           HorizontalAlignment="Left" VerticalAlignment="Bottom" Stretch="Uniform"
-           RenderOptions.BitmapScalingMode="HighQuality"/>
-
     <!-- Версия лаунчера: мелко в левом нижнем углу -->
     <TextBlock x:Name="TxtVersion" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="18,0,0,10" FontSize="12" Foreground="#6C6F73" IsHitTestVisible="False"/>
 
@@ -4717,6 +4741,12 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
         <TextBlock x:Name="TxtEmpty" Visibility="Collapsed" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                    Text="На этом компьютере нет доступных игр. Позови администратора клуба."/>
       </Grid>
+
+      <Image x:Name="WelcomePortraitImage" Grid.Row="2" Grid.RowSpan="2" Height="0"
+             Visibility="Collapsed" IsHitTestVisible="False"
+             HorizontalAlignment="Left" VerticalAlignment="Bottom"
+             Margin="{Binding Margin, ElementName=SessionStart}" Stretch="Uniform"
+             RenderOptions.BitmapScalingMode="HighQuality"/>
 
       <Grid Grid.Row="3">
         <Grid.ColumnDefinitions>
@@ -5393,7 +5423,12 @@ try {
     if ($script:Tiles.Count -eq 0) { $TxtEmpty.Visibility = 'Visible' }
     Initialize-TileSections
 
-    $TilesHost.Add_SizeChanged({ Update-TileLayout })
+    $TilesHost.Add_SizeChanged({
+        Update-TileLayout
+        Update-WelcomePortraitSize
+    })
+    $SessionStart.Add_SizeChanged({ Update-WelcomePortraitSize })
+    $DashHost.Add_SizeChanged({ Update-WelcomePortraitSize })
     $TileScroller.Add_ScrollChanged({ Update-ScrollArrows })
     $BtnScrollLeft.Add_Click({ Move-TileScroll -1 })
     $BtnScrollRight.Add_Click({ Move-TileScroll 1 })

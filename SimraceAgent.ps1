@@ -32,6 +32,8 @@ $script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокиро�
 $script:LauncherReport = $null      # последний отчёт лаунчера: игра, сеанс, громкость
 $script:VolumeCmd = $null           # громкость с управляющего компьютера: лаунчер заберёт её при следующем опросе
 $script:EndSessionCmd = $null       # команда для текущего сеанса, пока лаунчер не подтвердит закрытие
+$script:MinimizeCmd = $null
+$script:MinimizeError = ''
 # Управляющий компьютер клуба берём из настроек (club.adminComputer). В первом клубе это SIMRACE-14, в филиале SIMRACE-1.
 $script:AdminComputer = 'SIMRACE-14'
 try {
@@ -326,6 +328,11 @@ function Update-AgentState {
     Update-Network
     if ($script:EndSessionCmd -and [datetime]::UtcNow.Ticks -ge [long]$script:EndSessionCmd.expires) {
         Complete-EndSession 'Лаунчер не подтвердил завершение сеанса.'
+    }
+    if ($script:MinimizeCmd -and [datetime]::UtcNow.Ticks -ge [long]$script:MinimizeCmd.expires) {
+        $script:MinimizeCmd = $null
+        $script:MinimizeError = 'Лаунчер не подтвердил сворачивание.'
+        Write-Log $script:MinimizeError
     }
     Update-WaitingUpdate
     if ($script:State -ne 'updating' -or -not $script:UpdateProcess -or -not $script:UpdateProcess.HasExited) { return }
@@ -695,6 +702,9 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
                 usedMb = $data.usedMb; freeMb = $data.freeMb; pages = @($data.pages); busy = Get-BusyReason
                 pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
                 endingSession = [bool]$script:EndSessionCmd
+                launcherMinimizing = [bool]$script:MinimizeCmd
+                launcherMinimized = [bool]($script:LauncherReport.launcherMinimized -and ((Get-Date) - $script:LauncherSeen).TotalSeconds -lt 15)
+                minimizeError = $script:MinimizeError
                 session = Get-SessionReport
                 macs = @(Get-WakeMacs)
             }
@@ -726,6 +736,24 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
             $script:UpdateOk = $true
             Write-Log "Запрос завершения сеанса с $Remote"
             return @{ ok = $true; endingSession = $true }
+        }
+        'minimize-launcher' {
+            if (-not (Test-AdminSource $Remote)) {
+                Write-Log "Отказано: сворачивание лаунчера с $Remote, а не с $($script:AdminComputer)"
+                return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
+            }
+            if (-not $script:LauncherReport -or ((Get-Date) - $script:LauncherSeen).TotalSeconds -ge 15) {
+                return @{ ok = $false; error = 'Лаунчер на кокпите не отвечает.' }
+            }
+            if (-not $script:LauncherReport.PSObject.Properties['launcherMinimized']) {
+                return @{ ok = $false; error = 'Обнови лаунчер на этом кокпите.' }
+            }
+            if (-not $script:MinimizeCmd) {
+                $script:MinimizeCmd = @{ id = [guid]::NewGuid().ToString('N'); expires = [string]([datetime]::UtcNow.AddSeconds(30).Ticks) }
+                $script:MinimizeError = ''
+                Write-Log "Запрос сворачивания лаунчера с $Remote"
+            }
+            return @{ ok = $true; launcherMinimizing = $true }
         }
         'volume' {
             if (-not (Test-AdminSource $Remote)) {
@@ -820,8 +848,14 @@ function Invoke-Request($Request) {
             if ($script:EndSessionCmd -and [string]$Request.endSessionAck -eq $script:EndSessionCmd.id) {
                 Complete-EndSession ([string]$Request.endSessionError)
             }
+            if ($script:MinimizeCmd -and [string]$Request.minimizeAck -eq $script:MinimizeCmd.id) {
+                $script:MinimizeCmd = $null
+                $script:MinimizeError = [string]$Request.minimizeError
+                Write-Log $(if ($script:MinimizeError) { $script:MinimizeError } else { 'Лаунчер подтвердил сворачивание' })
+            }
+            elseif ($Request.launcherMinimized) { $script:MinimizeError = '' }
             $filter = Get-UwfFilter
-            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; volume = $script:VolumeCmd; endSession = $script:EndSessionCmd }
+            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; volume = $script:VolumeCmd; endSession = $script:EndSessionCmd; minimizeLauncher = $script:MinimizeCmd }
         }
         'overlay' { return $script:OverlayData }
         'record' {
