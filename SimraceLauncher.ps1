@@ -1940,6 +1940,10 @@ function Update-Proportions {
     $BottomRow.Height = New-Object System.Windows.GridLength($bottom)
     $DashHost.Height = $bottom
     $DashHost.Width = $bottom * 1520 / 500
+    $portraitLeft = [Math]::Round($width * 0.12)
+    $portraitSpace = [Math]::Max(0, ($width - $DashHost.Width) / 2 - $portraitLeft - 24)
+    $WelcomePortraitImage.Margin = [System.Windows.Thickness]::new($portraitLeft, 0, 0, 0)
+    $WelcomePortraitImage.Height = [Math]::Min([Math]::Round($height * 0.32), $portraitSpace)
     $TxtSelected.FontSize = $(if ($wide) { 42 } else { 34 })
     # На узком экране у кнопок остаются только значки
     foreach ($label in $script:ToolLabels) { $label.Visibility = $(if ($wide) { 'Visible' } else { 'Collapsed' }) }
@@ -2190,7 +2194,7 @@ function Update-WelcomeFooter {
     $idle = $script:TimerState -eq 'idle'
     $runningGame = $GameBar.Visibility -eq 'Visible'
     $SelectedInfo.Visibility = $(if ($idle -or $runningGame) { 'Collapsed' } else { 'Visible' })
-    $WelcomePortrait.Visibility = $(if ($idle -and -not $runningGame -and $WelcomePortraitImage.Source) { 'Visible' } else { 'Collapsed' })
+    $WelcomePortraitImage.Visibility = $(if ($idle -and -not $runningGame -and $WelcomePortraitImage.Source) { 'Visible' } else { 'Collapsed' })
     $GameShortcutHint.Visibility = $(if ($idle) { 'Collapsed' } else { 'Visible' })
 }
 
@@ -4501,6 +4505,10 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
       </Border>
     </Border>
 
+    <Image x:Name="WelcomePortraitImage" Visibility="Collapsed" IsHitTestVisible="False"
+           HorizontalAlignment="Left" VerticalAlignment="Bottom" Stretch="Uniform"
+           RenderOptions.BitmapScalingMode="HighQuality"/>
+
     <!-- Версия лаунчера: мелко в левом нижнем углу -->
     <TextBlock x:Name="TxtVersion" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="18,0,0,10" FontSize="12" Foreground="#6C6F73" IsHitTestVisible="False"/>
 
@@ -4748,11 +4756,6 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
           </StackPanel>
         </Border>
 
-        <Border x:Name="WelcomePortrait" Visibility="Collapsed" HorizontalAlignment="Left" MaxWidth="258" MaxHeight="246"
-                BorderThickness="1" BorderBrush="#65FFD083" Background="#E0191118" CornerRadius="4"
-                ClipToBounds="True" IsHitTestVisible="False">
-          <Image x:Name="WelcomePortraitImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
-        </Border>
         <StackPanel x:Name="SelectedInfo">
           <Rectangle Width="72" Height="3" Fill="{StaticResource Accent}" HorizontalAlignment="Left" Margin="0,0,0,14"/>
           <TextBlock x:Name="TxtSelected" Text="Выбери игру" Style="{StaticResource MenuHeading}" FontSize="42" TextTrimming="CharacterEllipsis"/>
@@ -5317,7 +5320,7 @@ try {
 
     $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
     foreach ($name in 'BackgroundImage', 'TxtVersion', 'PcBadge', 'RunPcNumber', 'UpdateToast', 'TxtUpdateToast', 'BtnUpdateToastClose', 'BtnUpdateToastOpen', 'TxtUpdateTile', 'BottomRow', 'FactBox', 'TxtFact', 'LogoHost', 'LogoImage', 'LogoText', 'LogoLettering', 'OriginalLogo', 'FeatureBox', 'ToolsPanel',
-                      'SunsetShade', 'WelcomeArt', 'WelcomeLabel', 'WelcomePortrait', 'WelcomePortraitImage', 'GameShortcutHint', 'StartArt', 'StartLabel', 'InfoLabel', 'InfoTitleArt', 'EquipmentDetails',
+                      'SunsetShade', 'WelcomeArt', 'WelcomeLabel', 'WelcomePortraitImage', 'GameShortcutHint', 'StartArt', 'StartLabel', 'InfoLabel', 'InfoTitleArt', 'EquipmentDetails',
                       'HeaderTools', 'TxtComputer', 'TxtClock', 'TilesHost', 'TileScroller', 'BtnScrollLeft', 'BtnScrollRight', 'RowsPanel', 'TxtEmpty', 'TxtSelected', 'TxtHint',
                       'DashHost', 'DashImage', 'LedCanvas', 'QrTelegram', 'QrSite',
                       'Overlay', 'WaitSpinner', 'OverlayLine', 'BtnOverlayCorner', 'TxtOverlayTitle', 'TxtOverlayText', 'BtnOverlay', 'AdminPanel', 'AdminUserInput', 'PasswordInput',
