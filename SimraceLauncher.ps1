@@ -1113,6 +1113,7 @@ function Stop-Session {
 }
 
 function Stop-SessionWithError([string]$Title, [string]$Text) {
+    if ($script:RemoteSessionEnd) { $script:RemoteSessionEnd.error = $Title }
     Hide-GameBar
     Add-GameRecord $script:Session
     $script:Session = $null
@@ -2200,6 +2201,7 @@ function Update-TimerLayout {
 }
 
 function Start-ClubSession {
+    if ($script:RemoteSessionEnd) { return }
     $script:TimerStart = Get-Date
     $script:TimerResume = $script:TimerStart
     $script:TimerAccum = [TimeSpan]::Zero
@@ -2222,8 +2224,9 @@ function Switch-ClubSessionPause {
 }
 
 # Завершение в два нажатия, чтобы не нажать случайно. Запущенная игра закрывается.
-function Stop-ClubSession {
-    if ($script:EndArmedUntil -eq [datetime]::MinValue) {
+function Stop-ClubSession([switch]$Confirmed) {
+    if ($script:TimerState -eq 'idle') { return }
+    if (-not $Confirmed -and $script:EndArmedUntil -eq [datetime]::MinValue) {
         $script:EndArmedUntil = (Get-Date).AddSeconds(4)
         $BtnEndSession.Content = 'Точно?'
         return
@@ -2237,7 +2240,13 @@ function Stop-ClubSession {
     Write-Log "Сеанс завершён: $total"
     $script:TimerState = 'idle'
     $script:TimerAccum = [TimeSpan]::Zero
-    if ($script:Session) { Stop-CurrentGame }
+    $script:SweepApp = $null
+    $script:NoticeApp = $null
+    $NoticePanel.Visibility = 'Collapsed'
+    if ($script:Session -and $script:Session.Stage -ne 'closing-game') {
+        if ($script:Session.Stage -eq 'running' -and -not $script:Session.Seen) { Stop-Launch }
+        else { Stop-CurrentGame }
+    }
     Update-TimerLayout
 }
 
@@ -2505,6 +2514,7 @@ function Update-LedSweep {
 
 # Что происходит после анимации: сразу открывается выбор аккаунта Steam или запускается игра.
 function Open-App($App, [bool]$NoticeSeen = $false) {
+    if ($script:RemoteSessionEnd) { return }
     if ($App.Kind -eq 'missing') {
         Show-Overlay "$($App.Name) не настроена" 'Не найден ярлык для запуска на рабочем столе. Позови администратора клуба.' 'Закрыть'
         Start-LedAmbient
@@ -3667,6 +3677,9 @@ function Add-GameRecord($Session) {
 # ---------- Отчёт для окна «Кокпиты» и громкость с SIMRACE-14 ----------
 
 $script:VolumeAck = ''
+$script:RemoteSessionEnd = $null
+$script:RemoteSessionAck = ''
+$script:RemoteSessionError = ''
 $script:HealthNet = ''
 $script:HealthInternet = $null
 $script:HealthVpn = ''
@@ -3679,10 +3692,52 @@ function Get-ReportVolume([string]$Group, $Chosen) {
     return [int][Math]::Round($level * 100)
 }
 
+function Get-EndSessionTarget {
+    if ($script:Config.requireSession -ne $false -and $script:TimerState -ne 'idle') { return "session:$($script:TimerStart.Ticks)" }
+    if ($script:Session) { return "game:$($script:Session.GameStart.Ticks)" }
+    return ''
+}
+
+function Update-RemoteSessionEnd($Command) {
+    if ($script:RemoteSessionEnd) {
+        if ($script:RemoteSessionAck -ne $script:RemoteSessionEnd.id) {
+            # Подтверждаем после закрытия игры и отправки записей статистики.
+            if ($script:Session -or $script:AgentShared.Records.Count -gt 0) { return }
+            $script:RemoteSessionAck = $script:RemoteSessionEnd.id
+            $script:RemoteSessionError = $script:RemoteSessionEnd.error
+            return
+        }
+        # Пока служба не получила подтверждение, кнопка нового заезда временно закрыта.
+        if ($Command -and [string]$Command.id -eq $script:RemoteSessionAck -and [datetime]::UtcNow.Ticks -lt $script:RemoteSessionEnd.expires) { return }
+        $script:RemoteSessionEnd = $null
+    }
+    if (-not $Command -or [string]$Command.id -eq $script:RemoteSessionAck) { return }
+    $expires = 0L
+    if (-not [long]::TryParse([string]$Command.expires, [ref]$expires) -or [datetime]::UtcNow.Ticks -ge $expires) { return }
+    if (-not $Command.target -or [string]$Command.target -cne (Get-EndSessionTarget)) {
+        $script:RemoteSessionAck = [string]$Command.id
+        $script:RemoteSessionError = 'Сеанс уже изменился. Проверь кокпит и повтори команду, если нужно.'
+        return
+    }
+    $script:RemoteSessionEnd = @{ id = [string]$Command.id; expires = $expires; error = '' }
+    try {
+        Write-Log 'Управляющий компьютер завершает сеанс'
+        if ($Command.target -like 'session:*') { Stop-ClubSession -Confirmed }
+        elseif ($script:Session.Stage -eq 'running' -and -not $script:Session.Seen) { Stop-Launch }
+        elseif ($script:Session.Stage -ne 'closing-game') { Stop-CurrentGame }
+    }
+    catch {
+        $script:RemoteSessionAck = $script:RemoteSessionEnd.id
+        $script:RemoteSessionError = "Не удалось завершить сеанс: $($_.Exception.Message)"
+        Write-Log $script:RemoteSessionError
+    }
+}
+
 function Update-AgentReport {
     if (-not $script:AgentShared) { return }
     # Сначала применяем громкость, если её прислали с SIMRACE-14
     $status = Get-AgentShared 'Status'
+    Update-RemoteSessionEnd $status.endSession
     if ($status -and $status.volume -and [string]$status.volume.id -ne $script:VolumeAck -and $script:AudioReady) {
         $command = $status.volume
         try {
@@ -3709,6 +3764,9 @@ function Update-AgentReport {
         start = $(if ($active) { $script:TimerStart.ToString('HH:mm') } else { '' })
         elapsed = $(if ($active) { [int](Get-SessionElapsed).TotalSeconds } else { 0 })
         volAck = $script:VolumeAck
+        endSessionTarget = Get-EndSessionTarget
+        endSessionAck = $script:RemoteSessionAck
+        endSessionError = $script:RemoteSessionError
         net = [string]$script:HealthNet
         internet = $script:HealthInternet
         vpn = [string]$script:HealthVpn

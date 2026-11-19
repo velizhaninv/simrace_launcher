@@ -148,6 +148,7 @@ $script:QueryScript = {
       <TextBlock x:Name="TxtStatus" Foreground="#A2A6AB" TextWrapping="Wrap" Margin="2,0,0,12"/>
       <UniformGrid Rows="1" Margin="0,0,-10,0">
         <Button x:Name="BtnUpdate" Content="Обновить лаунчер" Style="{StaticResource Primary}"/>
+        <Button x:Name="BtnEndSessions" Content="Завершить сеанс" Style="{StaticResource Danger}" ToolTip="Закрыть игру и завершить сеанс на отмеченных кокпитах"/>
         <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
         <Button x:Name="BtnUnlock" Content="Разблокировать" Style="{StaticResource Danger}"/>
         <Button x:Name="BtnReboot" Content="Перезагрузить" Style="{StaticResource Btn}"/>
@@ -168,7 +169,7 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnEndSessions', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
@@ -517,6 +518,10 @@ function Show-Result($Row, $Answer, [string]$Latest) {
         default { $(if ($game) { "игра: $game" } elseif ($data.busy) { [string]$data.busy } else { 'свободен' }) }
     }
     $color = $(if ($data.state -and $data.state -ne 'idle') { '#FFB020' } elseif ($game) { '#FFFFFF' } elseif ($data.busy) { '#B4B8BC' } else { '#37C552' })
+    if ($data.endingSession) {
+        $text = 'завершается сеанс'
+        $color = '#FFB020'
+    }
     if ($data.message -and $data.updateOk -eq $false) {
         $text = [string]$data.message
         $color = '#FF6A55'
@@ -536,7 +541,7 @@ function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scrip
     $ps = [powershell]::Create()
     [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnEndSessions, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
     return $true
 }
 
@@ -544,7 +549,7 @@ function Update-Query {
     if (-not $script:Running -or -not $script:Running.Async.IsCompleted) { return }
     $job = $script:Running
     $script:Running = $null
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $true }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnEndSessions, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $true }
     $output = $null
     try { $output = @($job.Ps.EndInvoke($job.Async))[0] } catch { $TxtStatus.Text = "Ошибка опроса: $_" }
     $job.Ps.Dispose()
@@ -562,9 +567,10 @@ function Start-Refresh {
     })
 }
 
-# Тексты для трёх команд: обновление, блокировка, перезагрузка
+# Тексты подтверждения для команд по сети
 $script:Commands = @{
     update = @{ Verb = 'Обновить лаунчер на'; Now = 'Обновить их сразу'; Note = 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.'; Done = 'обновятся' }
+    'end-session' = @{ Verb = 'Завершить сеанс на'; Note = 'Запущенная игра закроется. Уже поставленная в очередь команда продолжится после завершения.' }
     lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
     unlock = @{ Verb = 'РАЗБЛОКИРОВАТЬ'; Now = 'Разблокировать их сразу'; Note = 'Защита UWF выключится, компьютеры перезагрузятся. Пока защита выключена, всё, что сделают на компьютере, сохранится. Не забудь заблокировать их обратно.'; Done = 'разблокируются' }
     shutdown = @{ Verb = 'Выключить'; Now = 'Выключить их сразу'; Note = 'Компьютеры выключатся. Включить их обратно можно только кнопкой на корпусе.'; Done = 'выключатся' }
@@ -579,7 +585,7 @@ function Start-RemoteCommand([string]$Action) {
         return
     }
     if ($Action -ne 'update' -and $env:COMPUTERNAME -ne $script:AdminComputer) {
-        $TxtStatus.Text = "Блокировать и перезагружать кокпиты можно только с $($script:AdminComputer)."
+        $TxtStatus.Text = "Эта команда доступна только с $($script:AdminComputer)."
         return
     }
     $lines = @{}
@@ -600,8 +606,8 @@ function Start-RemoteCommand([string]$Action) {
     if ($fresh.Count -gt 0) {
         $busy = @($fresh | Where-Object { $script:RowMap[$_].Busy })
         $question = "$($text.Verb): $($fresh -join ', ')?`n`n$($text.Note)"
-        if ($busy.Count -gt 0) { $question += "`n`nСейчас заняты: $($busy -join ', '). Они $($text.Done), когда закончится сеанс." }
-        $icon = $(if ($Action -eq 'unlock') { 'Warning' } else { 'Question' })
+        if ($Action -ne 'end-session' -and $busy.Count -gt 0) { $question += "`n`nСейчас заняты: $($busy -join ', '). Они $($text.Done), когда закончится сеанс." }
+        $icon = $(if ($Action -in 'unlock', 'end-session') { 'Warning' } else { 'Question' })
         if ([System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNo', $icon) -ne 'Yes') { $selected = @($selected | Where-Object { $lines.ContainsKey($_) }) }
         if ($selected.Count -eq 0) { return }
     }
@@ -621,7 +627,6 @@ function Start-RemoteCommand([string]$Action) {
         if ($silent.Count + $refused.Count -eq 0) { $parts += 'Ход выполнения видно в столбце «Сейчас».' }
         $TxtStatus.Text = $parts -join ' '
         $script:StatusHold = (Get-Date).AddSeconds(30)
-        foreach ($name in $Output.Results.Keys) { $script:RowMap[$name].Check.IsChecked = $false }
         $script:NextRefresh = (Get-Date).AddSeconds(3)
     } $lines
     if (-not $started) { $TxtStatus.Text = 'Дождись окончания опроса и нажми ещё раз.' }
@@ -745,6 +750,7 @@ function Show-VolumePopup($Row, $Anchor) {
 
 $BtnRefresh.Add_Click({ Start-Refresh })
 $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
+$BtnEndSessions.Add_Click({ Start-RemoteCommand 'end-session' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
 $BtnWake.Add_Click({ Start-Wake })
 $BtnStats.Add_Click({

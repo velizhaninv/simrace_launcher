@@ -316,9 +316,10 @@ function Invoke-Api($Context, [string]$Path) {
             return Send-Json $Context @{ ok = $true; names = $script:Names; adminComputer = $script:AdminComputer; groups = @($script:Club.groups | Where-Object { $_ }); latest = $script:Cache.Latest; at = $(if ($script:Cache.At) { $script:Cache.At.ToString('HH:mm:ss') } else { '' }); rows = $rows; wake = @($script:Names | Where-Object { @($macs[$_]).Count -gt 0 }) }
         }
         '/api/command' {
+            if ($request.HttpMethod -ne 'POST') { return Send-Json $Context @{ ok = $false; error = 'Нужен POST-запрос.' } 405 }
             $body = Read-Body $request
             $action = [string]$body.action
-            if ('update', 'lock', 'unlock', 'reboot', 'shutdown' -notcontains $action) { return Send-Json $Context @{ ok = $false; error = 'Неизвестная команда.' } 400 }
+            if ('update', 'end-session', 'lock', 'unlock', 'reboot', 'shutdown' -notcontains $action) { return Send-Json $Context @{ ok = $false; error = 'Неизвестная команда.' } 400 }
             $names = @($body.names | Where-Object { $script:Names -contains $_ })
             if ($names.Count -eq 0) { return Send-Json $Context @{ ok = $false; error = 'Не выбраны кокпиты.' } 400 }
             $lines = @{}

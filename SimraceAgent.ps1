@@ -31,6 +31,7 @@ $script:WaitAction = 'update'
 $script:WaitTitles = @{ update = 'Обновление'; lock = 'Блокировка'; unlock = 'Разблокировка'; reboot = 'Перезагрузка'; shutdown = 'Выключение' }
 $script:LauncherReport = $null      # последний отчёт лаунчера: игра, сеанс, громкость
 $script:VolumeCmd = $null           # громкость с управляющего компьютера: лаунчер заберёт её при следующем опросе
+$script:EndSessionCmd = $null       # команда для текущего сеанса, пока лаунчер не подтвердит закрытие
 # Управляющий компьютер клуба берём из настроек (club.adminComputer). В первом клубе это SIMRACE-14, в филиале SIMRACE-1.
 $script:AdminComputer = 'SIMRACE-14'
 try {
@@ -323,6 +324,9 @@ function Update-AgentState {
     }
     Update-OverlayCache
     Update-Network
+    if ($script:EndSessionCmd -and [datetime]::UtcNow.Ticks -ge [long]$script:EndSessionCmd.expires) {
+        Complete-EndSession 'Лаунчер не подтвердил завершение сеанса.'
+    }
     Update-WaitingUpdate
     if ($script:State -ne 'updating' -or -not $script:UpdateProcess -or -not $script:UpdateProcess.HasExited) { return }
     $code = $script:UpdateProcess.ExitCode
@@ -387,12 +391,30 @@ function Request-LauncherRestart {
 # Чем занят кокпит. Пустая строка: свободен.
 # Ограничитель один: сеанс в лаунчере. Сеанс завершён — можно обновлять.
 function Get-BusyReason {
+    if ($script:EndSessionCmd) { return 'завершается сеанс' }
     if ($script:LauncherBusy -and ((Get-Date) - $script:LauncherSeen).TotalSeconds -lt 15) { return 'идёт сеанс' }
     return ''
 }
 
+function Complete-EndSession([string]$ErrorMessage) {
+    $script:EndSessionCmd = $null
+    if ($ErrorMessage) {
+        $script:UpdateOk = $false
+        $script:Message = $ErrorMessage
+        if ($script:State -eq 'waiting-idle') {
+            $script:State = 'idle'
+            $script:ForceUpdate = $false
+            $script:Message += ' Команда из очереди отменена.'
+        }
+        Write-Log $script:Message
+        return
+    }
+    $script:IdleNext = [datetime]::MinValue
+    Write-Log 'Лаунчер подтвердил завершение сеанса'
+}
+
 function Update-WaitingUpdate {
-    if ($script:State -ne 'waiting-idle' -or (Get-Date) -lt $script:IdleNext) { return }
+    if ($script:EndSessionCmd -or $script:State -ne 'waiting-idle' -or (Get-Date) -lt $script:IdleNext) { return }
     $script:IdleNext = (Get-Date).AddSeconds(30)
     $busy = $(if ($script:ForceUpdate) { '' } else { Get-BusyReason })
     $title = $script:WaitTitles[$script:WaitAction]
@@ -529,8 +551,11 @@ function Get-StatFile {
 }
 
 function Add-StatLine([string]$Line) {
-    try { Add-Content -LiteralPath (Get-StatFile) -Value $Line -Encoding UTF8 }
-    catch { Write-Log "Статистика не записана: $_" }
+    try { Add-Content -LiteralPath (Get-StatFile) -Value $Line -Encoding UTF8 -ErrorAction Stop }
+    catch {
+        Write-Log "Статистика не записана: $_"
+        throw
+    }
 }
 
 function Get-StatLines([int]$Days) {
@@ -669,6 +694,7 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
                 uwfNow = [bool]($filter -and $filter.CurrentEnabled); uwfNext = [bool]($filter -and $filter.NextEnabled)
                 usedMb = $data.usedMb; freeMb = $data.freeMb; pages = @($data.pages); busy = Get-BusyReason
                 pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
+                endingSession = [bool]$script:EndSessionCmd
                 session = Get-SessionReport
                 macs = @(Get-WakeMacs)
             }
@@ -677,6 +703,29 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
             # Записи за последние дни, не больше 31
             $days = [math]::Max(1, [math]::Min(31, [int]$(if ($Request.days) { $Request.days } else { 31 })))
             return @{ ok = $true; computer = $env:COMPUTERNAME; records = @(Get-StatLines $days) }
+        }
+        'end-session' {
+            if (-not (Test-AdminSource $Remote)) {
+                Write-Log "Отказано: завершение сеанса с $Remote, а не с $($script:AdminComputer)"
+                return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
+            }
+            if ($script:EndSessionCmd) { return @{ ok = $true; endingSession = $true } }
+            if ('idle', 'waiting-idle' -notcontains $script:State) {
+                return @{ ok = $false; error = 'Кокпит уже выполняет другую команду.' }
+            }
+            if (-not $script:LauncherReport -or ((Get-Date) - $script:LauncherSeen).TotalSeconds -ge 15) {
+                return @{ ok = $false; error = 'Лаунчер на кокпите не отвечает.' }
+            }
+            if (-not $script:LauncherReport.PSObject.Properties['endSessionTarget']) {
+                return @{ ok = $false; error = 'Обнови лаунчер на этом кокпите.' }
+            }
+            $target = [string]$script:LauncherReport.endSessionTarget
+            if (-not $target) { return @{ ok = $true; alreadyEnded = $true } }
+            $script:EndSessionCmd = @{ id = [guid]::NewGuid().ToString('N'); target = $target; expires = [string]([datetime]::UtcNow.AddSeconds(30).Ticks) }
+            $script:Message = ''
+            $script:UpdateOk = $true
+            Write-Log "Запрос завершения сеанса с $Remote"
+            return @{ ok = $true; endingSession = $true }
         }
         'volume' {
             if (-not (Test-AdminSource $Remote)) {
@@ -768,8 +817,11 @@ function Invoke-Request($Request) {
             }
             # Лаунчер применил громкость: больше её не передаём
             if ($script:VolumeCmd -and [string]$Request.volAck -eq $script:VolumeCmd.id) { $script:VolumeCmd = $null }
+            if ($script:EndSessionCmd -and [string]$Request.endSessionAck -eq $script:EndSessionCmd.id) {
+                Complete-EndSession ([string]$Request.endSessionError)
+            }
             $filter = Get-UwfFilter
-            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; volume = $script:VolumeCmd }
+            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; volume = $script:VolumeCmd; endSession = $script:EndSessionCmd }
         }
         'overlay' { return $script:OverlayData }
         'record' {
