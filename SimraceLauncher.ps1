@@ -2401,19 +2401,19 @@ function Add-Led([double]$X, [double]$Y, [double]$Size, $Colors) {
     return ,@($glow, $lamp)
 }
 
-# Лампы лежат над картинкой приборки: сверху 3 зелёных, 3 жёлтых, 3 красных, 3 жёлтых, 3 зелёных, по бокам оранжевые.
+# Розовый в центре, ледяной голубой и бирюзовый ближе к краям.
 function Initialize-Leds {
     $script:Leds = New-Object System.Collections.ArrayList
     $script:SideLeds = New-Object System.Collections.ArrayList
     $script:AmbientOn = $false
-    $green = @('#C9F5C0', '#37C552', '#15602A', '#6637C552')
-    $yellow = @('#FFF2B0', '#E9C62A', '#7D6607', '#66E9C62A')
-    $red = @('#FFB6A2', '#E5301A', '#7C1304', '#66E5301A')
-    $orange = @('#FFD2B3', '#EE6A22', '#7F2F07', '#66EE6A22')
-    $pattern = @($green, $green, $green, $yellow, $yellow, $yellow, $red, $red, $red, $yellow, $yellow, $yellow, $green, $green, $green)
+    $turquoise = @('#D2FFFA', '#43E0CB', '#146C65', '#6443E0CB')
+    $iceBlue = @('#E6F8FF', '#69BFFF', '#325B9F', '#6069BFFF')
+    $pink = @('#FFE5F4', '#F879BB', '#A93E78', '#66F879BB')
+    $pattern = @($turquoise, $turquoise, $turquoise, $iceBlue, $iceBlue, $iceBlue, $pink, $pink, $pink, $iceBlue, $iceBlue, $iceBlue, $turquoise, $turquoise, $turquoise)
     for ($i = 0; $i -lt 15; $i++) { [void]$script:Leds.Add((Add-Led (368 + $i * 56) 42 26 $pattern[$i])) }
-    foreach ($y in 180, 232, 284, 336) {
-        foreach ($x in 55, 1465) { [void]$script:SideLeds.Add((Add-Led $x $y 24 $orange)) }
+    $sidePattern = @($turquoise, $iceBlue, $iceBlue, $pink)
+    for ($i = 0; $i -lt $sidePattern.Count; $i++) {
+        foreach ($x in 55, 1465) { [void]$script:SideLeds.Add((Add-Led $x (180 + $i * 52) 24 $sidePattern[$i])) }
     }
 }
 
