@@ -34,6 +34,8 @@ $script:VolumeCmd = $null           # громкость с управляюще
 $script:EndSessionCmd = $null       # команда для текущего сеанса, пока лаунчер не подтвердит закрытие
 $script:MinimizeCmd = $null
 $script:MinimizeError = ''
+$script:SteamJob = $null
+$script:SteamResult = ''
 # Управляющий компьютер клуба берём из настроек (club.adminComputer). В первом клубе это SIMRACE-14, в филиале SIMRACE-1.
 $script:AdminComputer = 'SIMRACE-14'
 try {
@@ -170,10 +172,13 @@ function Get-StateFile {
     return $file
 }
 
-function Set-Pending([string]$Value) {
+function Set-Pending([string]$Value, [switch]$RequireCommit) {
     $file = Get-StateFile
     Set-Content -LiteralPath $file -Value $Value -Encoding ASCII
-    if ($file -like 'C:*' -or $file -like "$env:SystemDrive*") { & $script:Uwfmgr file commit $file | Out-Null }
+    if ($file -like 'C:*' -or $file -like "$env:SystemDrive*") {
+        & $script:Uwfmgr file commit $file | Out-Null
+        if ($RequireCommit -and $LASTEXITCODE -ne 0) { throw 'Не удалось сохранить этап обслуживания для перезагрузки.' }
+    }
 }
 
 function Get-Pending {
@@ -335,6 +340,7 @@ function Update-AgentState {
         Write-Log $script:MinimizeError
     }
     Update-WaitingUpdate
+    if ($script:SteamJob) { Update-SteamMaintenance }
     if ($script:State -ne 'updating' -or -not $script:UpdateProcess -or -not $script:UpdateProcess.HasExited) { return }
     $code = $script:UpdateProcess.ExitCode
     $script:UpdateProcess = $null
@@ -626,45 +632,226 @@ function Set-WakeOnLan {
 # У каждой установленной игры ставим «Обновлять игру только при её запуске» (AutoUpdateBehavior = 1),
 # чтобы Steam не качал обновления в фоне и не заполнял overlay при включённой защите.
 # Пишем только при выключенной защите и закрытом Steam: иначе изменения пропадут или Steam их перезапишет.
-function Set-SteamUpdateOnLaunch {
-    $filter = Get-UwfFilter
-    if ($filter -and $filter.CurrentEnabled) { return }
-    if (Get-Process -Name steam -ErrorAction SilentlyContinue) {
-        Write-Log 'Обновления Steam: Steam запущен, настройку игр пропускаю до следующей загрузки'
-        return
-    }
+function Get-SteamInstallRoots {
     $roots = @()
     foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam') {
         $value = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).InstallPath
         if ($value) { $roots += $value }
     }
+    $roots | Sort-Object -Unique
+}
+
+function Get-SteamManifests {
     $libraries = @()
-    foreach ($root in $roots) {
+    foreach ($root in (Get-SteamInstallRoots)) {
         $libraries += $root
         $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
         if (Test-Path -LiteralPath $vdf) {
             foreach ($match in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw -Encoding UTF8), '"path"\s+"([^"]+)"')) { $libraries += ($match.Groups[1].Value -replace '\\\\', '\') }
         }
     }
-    $encoding = New-Object System.Text.UTF8Encoding($false)
-    $changed = 0
-    $total = 0
     foreach ($library in @($libraries | Sort-Object -Unique)) {
         $apps = Join-Path $library 'steamapps'
         if (-not (Test-Path -LiteralPath $apps)) { continue }
-        foreach ($file in @(Get-ChildItem -LiteralPath $apps -Filter 'appmanifest_*.acf' -File -ErrorAction SilentlyContinue)) {
-            $total++
-            try {
-                $text = [System.IO.File]::ReadAllText($file.FullName, $encoding)
-                if ($text -notmatch '"AutoUpdateBehavior"\s+"(\d+)"' -or $Matches[1] -eq '1') { continue }
-                $text = [regex]::Replace($text, '("AutoUpdateBehavior"\s+")\d+(")', '${1}1${2}')
-                [System.IO.File]::WriteAllText($file.FullName, $text, $encoding)
-                $changed++
+        Get-ChildItem -LiteralPath $apps -Filter 'appmanifest_*.acf' -File
+    }
+}
+
+function Set-SteamManifestBehavior($File, [int]$Behavior) {
+    $text = [System.IO.File]::ReadAllText($File.FullName, $script:Utf8)
+    $pattern = '("AutoUpdateBehavior"\s+")\d+(")'
+    if ($text -notmatch $pattern) {
+        if ($Behavior -eq 2) { throw "В $($File.Name) нет настройки обновлений." }
+        return $false
+    }
+    $updated = [regex]::Replace($text, $pattern, ('${1}' + $Behavior + '${2}'), 'IgnoreCase')
+    if ($updated -ceq $text) { return $false }
+    $temp = "$($File.FullName).$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [System.IO.File]::WriteAllText($temp, $updated, $script:Utf8)
+        [System.IO.File]::Replace($temp, $File.FullName, [NullString]::Value)
+    }
+    finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue } }
+    return $true
+}
+
+function Set-SteamUpdateOnLaunch {
+    $filter = Get-UwfFilter
+    if (($filter -and $filter.CurrentEnabled) -or (Get-Process -Name steam -ErrorAction SilentlyContinue)) { return }
+    $files = @(Get-SteamManifests)
+    $changed = 0
+    foreach ($file in $files) {
+        try { if (Set-SteamManifestBehavior $file 1) { $changed++ } }
+        catch { Write-Log "Обновления Steam: не изменён $($file.Name): $_" }
+    }
+    $total = $files.Count
+    if ($changed -gt 0) { Write-Log "Обновления Steam: игр переведено на «только при запуске»: $changed из $total" }
+}
+
+function Get-SteamGameManifests {
+    $apps = (Get-Content -LiteralPath (Join-Path $script:Root 'apps.json') -Raw -Encoding UTF8 | ConvertFrom-Json).apps
+    $names = @($apps | Where-Object { $_.steamAppId -match '^\d+$' } | ForEach-Object { "appmanifest_$($_.steamAppId).acf" })
+    Get-SteamManifests | Where-Object { $_.Name -in $names }
+}
+
+function New-SteamJob([string]$Phase) {
+    $script:State = 'steam-games'
+    $script:UpdateOk = $true
+    $script:SteamResult = ''
+    $script:SteamJob = @{ id = [guid]::NewGuid().ToString('N'); phase = $Phase
+        next = [datetime]::MinValue; until = (Get-Date).AddSeconds(60); result = '' }
+}
+
+function Stop-SteamJob([string]$ErrorMessage) {
+    $job = $script:SteamJob
+    if ($ErrorMessage) { Write-Log "Обновление игр: $ErrorMessage" }
+    $job.result = $ErrorMessage
+    $job.phase = 'closing'
+    $job.until = (Get-Date).AddSeconds(45)
+    $script:Message = 'Закрываем Steam и возвращаем защиту.'
+}
+
+# Смотрим только записи, появившиеся после запуска Steam для текущей проверки.
+function Get-SteamMetadataCheck([datetime]$Since) {
+    $check = $null
+    foreach ($root in (Get-SteamInstallRoots)) {
+        $log = Join-Path $root 'logs\appinfo_log.txt'
+        if (-not (Test-Path -LiteralPath $log)) { continue }
+        foreach ($line in (Get-Content -LiteralPath $log -Tail 400 -ErrorAction SilentlyContinue)) {
+            if ($line -notmatch '^\[([\d-]+ [\d:]+)\] UpdatesJob: finished (\w+)') { continue }
+            $result = $Matches[2]
+            $at = [datetime]::MinValue
+            if ([datetime]::TryParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$at) -and $at -ge $Since) {
+                $check = @{ At = $at; Ok = $result -eq 'OK' }
             }
-            catch { Write-Log "Обновления Steam: не изменён $($file.Name): $_" }
         }
     }
-    if ($changed -gt 0) { Write-Log "Обновления Steam: игр переведено на «только при запуске»: $changed из $total" }
+    return $check
+}
+
+function Update-SteamMaintenance {
+    $job = $script:SteamJob
+    $now = Get-Date
+    if ($now -lt $job.next -or $job.phase -eq 'restart') { return }
+    $job.next = $now.AddSeconds(3)
+    $report = $script:LauncherReport
+    $fresh = $report -and ($now - $script:LauncherSeen).TotalSeconds -lt 15
+    $reserved = $fresh -and [string]$report.steamMaintenanceReady -eq $job.id
+    try {
+        switch ($job.phase) {
+            'reserve' {
+                if (-not $reserved -and $now -lt $job.until) { return }
+                if (-not $reserved -or $report.session -or $report.game -or $report.endSessionTarget) { throw 'Кокпит занят или лаунчер не подтвердил готовность.' }
+                $filter = Get-UwfFilter
+                if (-not $filter) { throw 'UWF не отвечает.' }
+                if (-not $filter.CurrentEnabled) {
+                    Set-Pending 'steam-games'
+                    $job.phase = 'prepare'
+                    $job.until = $now.AddMinutes(2)
+                    return
+                }
+                Set-Pending 'steam-games' -RequireCommit
+                Set-Uwf $false
+                $script:Message = 'Перезагрузка для обновления игр.'
+                Restart-Pc
+                $job.phase = 'restart'
+            }
+            'prepare' {
+                if ($now -ge $job.until) { throw 'Лаунчер не подготовил Steam к обновлению.' }
+                if (-not $reserved -or $report.session -or $report.game -or $report.endSessionTarget) { return }
+                if (Get-Process -Name steam -ErrorAction SilentlyContinue) { return }
+                $filter = Get-UwfFilter
+                if (-not $filter -or $filter.CurrentEnabled) { throw 'Steam не запущен: UWF не был выключен.' }
+                $job.files = @(Get-SteamGameManifests)
+                if (-not $job.files.Count) { throw 'Игры Steam из списка лаунчера не найдены.' }
+                Set-Pending 'steam-games-run'
+                foreach ($file in $job.files) { [void](Set-SteamManifestBehavior $file 2) }
+                $job.started = $now
+                $job.clearSince = $null
+                $job.until = $now.AddHours(2)
+                $job.phase = 'download'
+                $script:Message = 'Steam проверяет обновления.'
+            }
+            'download' {
+                if ($now -ge $job.until) { throw 'Очередь Steam не завершилась за два часа.' }
+                if (-not $reserved -and $now -ge $job.started.AddMinutes(2)) { throw 'Нет связи с лаунчером.' }
+                $gameCheck = Get-SteamMetadataCheck $job.started
+                if ((-not $gameCheck.Ok -or -not $report.steamSignedIn) -and $now -ge $job.started.AddMinutes(10)) {
+                    throw 'Steam не подтвердил вход в аккаунт и получение данных об играх.'
+                }
+                if (-not $reserved -or -not $report.steamSignedIn -or -not $gameCheck.Ok) {
+                    $job.clearSince = $null
+                    $script:Message = 'Steam проверяет обновления.'
+                    return
+                }
+                $remaining = @(foreach ($file in $job.files) {
+                    $raw = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
+                    if ($raw -notmatch '"StateFlags"\s+"4"' -or $raw -notmatch '"buildid"\s+"[1-9]\d*"' -or
+                        (Test-Path -LiteralPath (Join-Path $file.DirectoryName ("downloading\" + ($file.BaseName -replace '^appmanifest_', ''))))) { $file }
+                })
+                $script:Message = "Обновление игр Steam · осталось $($remaining.Count) из $($job.files.Count)"
+                if ($remaining.Count) {
+                    $job.clearSince = $null
+                    return
+                }
+                if (-not $job.clearSince) { $job.clearSince = $now }
+                if ($now -ge $job.clearSince.AddSeconds(90)) { Stop-SteamJob '' }
+            }
+            'closing' {
+                $filter = Get-UwfFilter
+                if (-not $filter) { throw 'Не удалось прочитать состояние UWF.' }
+                if (-not $filter.CurrentEnabled) {
+                    $steam = @(Get-Process -Name steam -ErrorAction SilentlyContinue)
+                    if ($steam.Count) {
+                        if ($now -lt $job.until) { return }
+                        if (-not $job.forcedStop) {
+                            $job.forcedStop = $true
+                            $job.until = $now.AddSeconds(10)
+                            $job.result = 'Steam не завершился штатно.'
+                            $steam | Stop-Process -Force -ErrorAction SilentlyContinue
+                            return
+                        }
+                        $job.result = 'Не удалось закрыть Steam для возврата настройки загрузок.'
+                    }
+                    else {
+                        try {
+                            foreach ($file in (Get-SteamGameManifests)) { [void](Set-SteamManifestBehavior $file 1) }
+                        }
+                        catch { $job.result = "Не удалось вернуть настройку загрузок Steam: $($_.Exception.Message)" }
+                    }
+                    if ($job.result) { Write-Log $job.result }
+                    Set-Uwf $true
+                    Set-Pending $(if ($job.result) { 'steam-games-error' } else { 'steam-games-ok' })
+                    Restart-Pc
+                    $job.phase = 'restart'
+                    return
+                }
+                if (-not $filter.NextEnabled) { Set-Uwf $true }
+                Set-Pending '' -RequireCommit
+                $script:State = 'idle'
+                $script:UpdateOk = -not $job.result
+                $script:Message = $(if ($job.result) { $job.result } else { 'Проверка Steam завершена, UWF включён.' })
+                $script:SteamResult = $script:Message
+                $script:SteamJob = $null
+            }
+        }
+    }
+    catch {
+        if ($job.phase -eq 'closing') {
+            $job.result = "Не удалось завершить обслуживание: $($_.Exception.Message)"
+            $script:Message = $job.result
+            $script:UpdateOk = $false
+            $job.next = $now.AddSeconds(30)
+            Write-Log $job.result
+        }
+        elseif ($job.phase -eq 'reserve' -and -not (Get-Pending)) {
+            $script:State = 'idle'
+            $script:UpdateOk = $false
+            $script:Message = $_.Exception.Message
+            $script:SteamJob = $null
+        }
+        else { Stop-SteamJob $_.Exception.Message }
+    }
 }
 
 function Test-AdminSource([System.Net.IPAddress]$Remote) {
@@ -698,6 +885,7 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
             return @{
                 ok = $true; computer = $env:COMPUTERNAME; version = Get-InstalledVersion; state = $script:State
                 message = $script:Message; updateOk = $script:UpdateOk
+                steamResult = $script:SteamResult
                 uwfNow = [bool]($filter -and $filter.CurrentEnabled); uwfNext = [bool]($filter -and $filter.NextEnabled)
                 usedMb = $data.usedMb; freeMb = $data.freeMb; pages = @($data.pages); busy = Get-BusyReason
                 pending = $(if ($script:State -eq 'waiting-idle') { $script:WaitAction } else { '' })
@@ -737,11 +925,35 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
             Write-Log "Запрос завершения сеанса с $Remote"
             return @{ ok = $true; endingSession = $true }
         }
+        'steam-games' {
+            if (-not (Test-AdminSource $Remote)) {
+                return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
+            }
+            if ($script:SteamJob) { return @{ ok = $true; state = $script:State } }
+            if ($script:State -ne 'idle' -or (Get-Pending)) { return @{ ok = $false; error = 'Кокпит уже выполняет другую команду.' } }
+            $report = $script:LauncherReport
+            if (-not $report -or ((Get-Date) - $script:LauncherSeen).TotalSeconds -ge 15) {
+                return @{ ok = $false; error = 'Лаунчер на кокпите не отвечает.' }
+            }
+            if (-not $report.PSObject.Properties['steamMaintenanceReady']) {
+                return @{ ok = $false; error = 'Обнови лаунчер на этом кокпите.' }
+            }
+            if ($report.session -or $report.game -or $report.endSessionTarget -or $script:EndSessionCmd) {
+                return @{ ok = $false; error = 'Кокпит занят.' }
+            }
+            if (-not (Get-UwfFilter)) { return @{ ok = $false; error = 'UWF на этом компьютере недоступен.' } }
+            if (-not @(Get-SteamGameManifests).Count) { return @{ ok = $false; error = 'Игры Steam из списка лаунчера не найдены.' } }
+            New-SteamJob 'reserve'
+            $script:Message = 'Подготовка к обновлению игр.'
+            Write-Log "Запрос обновления игр Steam с $Remote"
+            return @{ ok = $true; state = $script:State }
+        }
         'minimize-launcher' {
             if (-not (Test-AdminSource $Remote)) {
                 Write-Log "Отказано: сворачивание лаунчера с $Remote, а не с $($script:AdminComputer)"
                 return @{ ok = $false; error = "Команда принимается только с $($script:AdminComputer)." }
             }
+            if ($script:SteamJob) { return @{ ok = $false; error = 'Идёт обновление игр Steam.' } }
             if (-not $script:LauncherReport -or ((Get-Date) - $script:LauncherSeen).TotalSeconds -ge 15) {
                 return @{ ok = $false; error = 'Лаунчер на кокпите не отвечает.' }
             }
@@ -797,6 +1009,7 @@ function Invoke-NetRequest($Request, [System.Net.IPAddress]$Remote) {
             return @{ ok = $true; state = $script:State }
         }
         'update' {
+            if ($script:SteamJob) { return @{ ok = $false; error = 'Идёт обновление игр Steam.' } }
             if ($script:State -eq 'waiting-idle' -and $script:WaitAction -ne 'update') {
                 return @{ ok = $false; error = "Кокпит ждёт другую команду: $($script:WaitAction)" }
             }
@@ -835,6 +1048,9 @@ function Test-Token($Request) {
 }
 
 function Invoke-Request($Request) {
+    if ($script:SteamJob -and $Request.action -in 'update', 'uwf', 'decide', 'reboot', 'shutdown') {
+        throw 'Идёт обновление игр Steam.'
+    }
     switch ([string]$Request.action) {
         'status' {
             # Лаунчер сообщает, идёт ли сеанс: обновление по сети его дождётся
@@ -855,7 +1071,8 @@ function Invoke-Request($Request) {
             }
             elseif ($Request.launcherMinimized) { $script:MinimizeError = '' }
             $filter = Get-UwfFilter
-            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; volume = $script:VolumeCmd; endSession = $script:EndSessionCmd; minimizeLauncher = $script:MinimizeCmd }
+            return @{ ok = $true; state = $script:State; message = $script:Message; updateOk = $script:UpdateOk; uwfNow = [bool]($filter -and $filter.CurrentEnabled); version = Get-InstalledVersion; volume = $script:VolumeCmd; endSession = $script:EndSessionCmd; minimizeLauncher = $script:MinimizeCmd
+                steamMaintenance = $(if ($script:SteamJob) { @{ id = $script:SteamJob.id; phase = $script:SteamJob.phase } } else { $null }) }
         }
         'overlay' { return $script:OverlayData }
         'record' {
@@ -964,7 +1181,7 @@ try { Set-OverlaySize }
 catch { Write-Log "Ошибка настройки overlay: $_" }
 try { Set-WakeOnLan }
 catch { Write-Log "Ошибка настройки Wake-on-LAN: $_" }
-try { Set-SteamUpdateOnLaunch }
+try { if ((Get-Pending) -notlike 'steam-games*') { Set-SteamUpdateOnLaunch } }
 catch { Write-Log "Ошибка настройки обновлений Steam: $_" }
 
 # Сетевые команды из локальной сети
@@ -980,6 +1197,24 @@ catch {
 # Продолжаем обновление, начатое до перезагрузки
 try {
     $pending = Get-Pending
+    if ($pending -in 'steam-games', 'steam-games-run', 'steam-games-ok', 'steam-games-error') {
+        $filter = Get-UwfFilter
+        if ($filter -and $filter.CurrentEnabled -and $filter.NextEnabled) {
+            Set-Pending '' -RequireCommit
+            $script:UpdateOk = $pending -eq 'steam-games-ok'
+            $script:Message = $(if ($script:UpdateOk) { 'Проверка Steam завершена, UWF включён.' } else { 'Обновление Steam не завершилось. UWF включён, подробности в журнале.' })
+            $script:SteamResult = $script:Message
+        }
+        elseif ($filter -and -not $filter.CurrentEnabled -and $pending -eq 'steam-games') {
+            New-SteamJob 'prepare'
+            $script:SteamJob.until = (Get-Date).AddMinutes(2)
+            $script:Message = 'Подготовка Steam после перезагрузки.'
+        }
+        else {
+            New-SteamJob 'closing'
+            Stop-SteamJob 'Обслуживание прервано, возвращаем защиту.'
+        }
+    }
     if ($pending -eq 'maintain') {
         # Обслуживание из прежней версии: функцию убрали, защиту возвращаем
         Set-Pending ''

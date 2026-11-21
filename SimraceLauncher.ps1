@@ -1493,6 +1493,7 @@ function Test-SteamPickerClosed($Session) {
 }
 
 function Start-App($App, [bool]$ChooseAccount = $false) {
+    if ($script:SteamMaintenance) { return }
     $script:CancelledLaunch = $null
     $Account = $App.Account
     $script:GameWindow = [IntPtr]::Zero
@@ -2241,7 +2242,7 @@ function Update-TimerLayout {
 }
 
 function Start-ClubSession {
-    if ($script:RemoteSessionEnd) { return }
+    if ($script:RemoteSessionEnd -or $script:SteamMaintenance) { return }
     $script:TimerStart = Get-Date
     $script:TimerResume = $script:TimerStart
     $script:TimerAccum = [TimeSpan]::Zero
@@ -2554,7 +2555,7 @@ function Update-LedSweep {
 
 # Что происходит после анимации: сразу открывается выбор аккаунта Steam или запускается игра.
 function Open-App($App, [bool]$NoticeSeen = $false) {
-    if ($script:RemoteSessionEnd) { return }
+    if ($script:RemoteSessionEnd -or $script:SteamMaintenance) { return }
     if ($App.Kind -eq 'missing') {
         Show-Overlay "$($App.Name) не настроена" 'Не найден ярлык для запуска на рабочем столе. Позови администратора клуба.' 'Закрыть'
         Start-LedAmbient
@@ -3579,6 +3580,7 @@ function Open-TaskManager {
 
 # Steam из панели администратора: открывается под гостем, окно выводится поверх лаунчера
 function Open-SteamWindow {
+    if ($script:SteamMaintenance) { return }
     if (-not $script:SteamExe -or -not (Test-Path -LiteralPath $script:SteamExe)) {
         Show-AdminNote 'Steam на этом компьютере не найден.'
         return
@@ -3722,6 +3724,8 @@ $script:RemoteSessionAck = ''
 $script:RemoteSessionError = ''
 $script:MinimizeAck = ''
 $script:MinimizeError = ''
+$script:SteamMaintenance = $null
+$script:SteamMaintenanceNext = [datetime]::MinValue
 $script:HealthNet = ''
 $script:HealthInternet = $null
 $script:HealthVpn = ''
@@ -3792,10 +3796,31 @@ function Update-RemoteLauncherMinimize($Command) {
     }
 }
 
+function Update-SteamMaintenanceWindow($Command) {
+    if ([bool]$script:SteamMaintenance -ne [bool]$Command) {
+        $BtnStartSession.IsEnabled = -not $Command
+        $SteamMaintenanceBanner.Visibility = $(if ($Command) { 'Visible' } else { 'Collapsed' })
+    }
+    $script:SteamMaintenance = $Command
+    if (-not $Command -or -not $script:SteamExe -or $script:Session -or (Get-EndSessionTarget)) { return }
+    $steamRunning = [bool](Get-Process -Name steam -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $script:LauncherSessionId })
+    if ((Get-Date) -lt $script:SteamMaintenanceNext) { return }
+    $argsForSteam = switch ($Command.phase) {
+        { $_ -in 'prepare', 'closing' } { if ($steamRunning) { '-shutdown' } }
+        'download' { if (-not $steamRunning) { '-silent' } }
+    }
+    if ($argsForSteam) {
+        $script:SteamMaintenanceNext = (Get-Date).AddSeconds(15)
+        try { [void](Start-Process -FilePath $script:SteamExe -ArgumentList $argsForSteam) }
+        catch { Write-Log "Обновление игр: Steam не выполнил команду $argsForSteam. $_" }
+    }
+}
+
 function Update-AgentReport {
     if (-not $script:AgentShared) { return }
     # Сначала применяем громкость, если её прислали с SIMRACE-14
     $status = Get-AgentShared 'Status'
+    if ($status) { Update-SteamMaintenanceWindow $status.steamMaintenance }
     Update-RemoteSessionEnd $status.endSession
     Update-RemoteLauncherMinimize $status.minimizeLauncher
     if ($status -and $status.volume -and [string]$status.volume.id -ne $script:VolumeAck -and $script:AudioReady) {
@@ -3830,6 +3855,10 @@ function Update-AgentReport {
         launcherMinimized = [bool]($script:ServiceMode -and $Window.WindowState -eq 'Minimized')
         minimizeAck = $script:MinimizeAck
         minimizeError = $script:MinimizeError
+        steamMaintenanceReady = $(if ($script:SteamMaintenance -and -not (Get-EndSessionTarget) -and -not $script:Session -and -not $script:SweepApp -and $script:AgentShared.Records.Count -eq 0) { [string]$script:SteamMaintenance.id } else { '' })
+        steamSignedIn = [bool]($script:SteamMaintenance -and
+            (Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam\ActiveProcess' -Name ActiveUser -ErrorAction SilentlyContinue).ActiveUser -and
+            (Get-Process -Name steam -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $script:LauncherSessionId }))
         net = [string]$script:HealthNet
         internet = $script:HealthInternet
         vpn = [string]$script:HealthVpn
@@ -4939,6 +4968,12 @@ function Set-HudLettering($Label, $Picture, [string]$File) {
       </Grid>
     </Grid>
 
+    <Border x:Name="SteamMaintenanceBanner" Visibility="Collapsed" Background="#EA141316"
+            BorderBrush="#55FFFFFF" BorderThickness="1" CornerRadius="6" Padding="36,24"
+            HorizontalAlignment="Center" VerticalAlignment="Center">
+      <TextBlock Text="Обновление игр Steam" FontSize="36" FontWeight="Bold" Foreground="{StaticResource HudYellow}"/>
+    </Border>
+
     <!-- Описание игры по значку «i» -->
     <Grid x:Name="InfoPanel" Visibility="Collapsed" Background="#B80C0A10">
       <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="740" MaxWidth="{Binding ActualWidth, ElementName=InfoPanel}"
@@ -5271,6 +5306,7 @@ try {
     $script:SteamDirs = @{}
     $script:SteamRoot = Get-SteamRoot
     $script:SteamExe = if ($script:SteamRoot) { Join-Path $script:SteamRoot 'steam.exe' } else { $null }
+    $script:LauncherSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
     $script:SteamLibraries = Get-SteamLibraries $script:SteamRoot
 
     $script:ExitCode = 0
@@ -5534,6 +5570,7 @@ try {
     })
 
     $BtnAdminLogin.Add_Click({ Submit-AdminLogin })
+    $SteamMaintenanceBanner = $Window.FindName('SteamMaintenanceBanner')
     $BtnRestartLauncher.Add_Click({ Close-Launcher 2 })
     $BtnAdminTaskMgr.Add_Click({ Open-TaskManager })
     $BtnAdminSteam.Add_Click({ Open-SteamWindow })
@@ -5635,6 +5672,8 @@ try {
         if (-not [SimraceNative]::InstallKeyGuard()) { Write-Log 'Не удалось включить перехват клавиш' }
     })
     $Window.Add_Loaded({
+        $maintenance = Invoke-Agent @{ action = 'status' } 500
+        if ($maintenance.steamMaintenance) { Update-SteamMaintenanceWindow $maintenance.steamMaintenance }
         Update-Proportions
         Update-TileLayout
         if ($script:DashOn) { Start-LedSweep $null }

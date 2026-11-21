@@ -76,6 +76,11 @@ $script:QueryScript = {
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="0,0,10,0"/>
       <Setter Property="Height" Value="46"/>
+      <Setter Property="ContentTemplate">
+        <Setter.Value>
+          <DataTemplate><TextBlock Text="{Binding}" TextAlignment="Center" TextWrapping="Wrap"/></DataTemplate>
+        </Setter.Value>
+      </Setter>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
@@ -148,6 +153,7 @@ $script:QueryScript = {
       <TextBlock x:Name="TxtStatus" Foreground="#A2A6AB" TextWrapping="Wrap" Margin="2,0,0,12"/>
       <UniformGrid Rows="1" Margin="0,0,-10,0">
         <Button x:Name="BtnUpdate" Content="Обновить лаунчер" Style="{StaticResource Primary}"/>
+        <Button x:Name="BtnUpdateGames" Content="Обновить игры Steam" Style="{StaticResource Btn}" ToolTip="Обновить игры Steam на свободных выбранных кокпитах"/>
         <Button x:Name="BtnMinimizeLaunchers" Content="Свернуть лаунчер" Style="{StaticResource Btn}" ToolTip="Свернуть окно лаунчера на отмеченных кокпитах"/>
         <Button x:Name="BtnEndSessions" Content="Завершить сеанс" Style="{StaticResource Danger}" ToolTip="Закрыть игру и завершить сеанс на отмеченных кокпитах"/>
         <Button x:Name="BtnLock" Content="Заблокировать" Style="{StaticResource Btn}"/>
@@ -170,7 +176,7 @@ $script:QueryScript = {
 </Window>
 '@
 $Window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnMinimizeLaunchers', 'BtnEndSessions', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
+foreach ($name in 'TxtLatest', 'TxtStatus', 'BtnUpdate', 'BtnUpdateGames', 'BtnMinimizeLaunchers', 'BtnEndSessions', 'BtnLock', 'BtnUnlock', 'BtnReboot', 'BtnShutdown', 'BtnWake', 'BtnStats', 'BtnSelectOld', 'BtnSelectAll', 'BtnSelectNone', 'BtnRefresh', 'Rows', 'HeaderHost', 'RowsScroll') {
     Set-Variable -Name $name -Value $Window.FindName($name) -Scope Script
 }
 
@@ -512,11 +518,12 @@ function Show-Result($Row, $Answer, [string]$Latest) {
             $(if ($data.busy) { "$verb после сеанса ($($data.busy))" } else { "$verb через несколько секунд" })
         }
         'updating' { 'обновляется' }
+        'steam-games' { [string]$data.message }
         'rebooting' { 'перезагружается' }
         'shutdown' { 'выключается' }
         'await-decision' { 'ждёт ответа на экране' }
         # Без команд в работе: запущенная игра, иначе сеанс или «свободен»
-        default { $(if ($game) { "игра: $game" } elseif ($data.busy) { [string]$data.busy } else { 'свободен' }) }
+        default { $(if ($game) { "игра: $game" } elseif ($data.busy) { [string]$data.busy } elseif ($data.steamResult -and $data.uwfNow) { [string]$data.steamResult } else { 'свободен' }) }
     }
     $color = $(if ($data.state -and $data.state -ne 'idle') { '#FFB020' } elseif ($game) { '#FFFFFF' } elseif ($data.busy) { '#B4B8BC' } else { '#37C552' })
     if ($data.launcherMinimizing) {
@@ -553,7 +560,7 @@ function Start-Query([string[]]$Names, [string]$Line, [bool]$WithVersion, [scrip
     $ps = [powershell]::Create()
     [void]$ps.AddScript($script:QueryScript).AddArgument($Names).AddArgument($script:Port).AddArgument($Line).AddArgument($(if ($WithVersion) { $script:VersionUrl } else { '' })).AddArgument($Lines)
     $script:Running = @{ Ps = $ps; Async = $ps.BeginInvoke(); Done = $Done }
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMinimizeLaunchers, $BtnEndSessions, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnUpdateGames, $BtnMinimizeLaunchers, $BtnEndSessions, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $false }
     return $true
 }
 
@@ -561,7 +568,7 @@ function Update-Query {
     if (-not $script:Running -or -not $script:Running.Async.IsCompleted) { return }
     $job = $script:Running
     $script:Running = $null
-    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnMinimizeLaunchers, $BtnEndSessions, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $true }
+    foreach ($button in $BtnRefresh, $BtnUpdate, $BtnUpdateGames, $BtnMinimizeLaunchers, $BtnEndSessions, $BtnLock, $BtnUnlock, $BtnReboot, $BtnShutdown) { $button.IsEnabled = $true }
     $output = $null
     try { $output = @($job.Ps.EndInvoke($job.Async))[0] } catch { $TxtStatus.Text = "Ошибка опроса: $_" }
     $job.Ps.Dispose()
@@ -582,6 +589,7 @@ function Start-Refresh {
 # Тексты подтверждения для команд по сети
 $script:Commands = @{
     update = @{ Verb = 'Обновить лаунчер на'; Now = 'Обновить их сразу'; Note = 'Защита UWF будет выключена на время обновления и включена обратно, компьютеры перезагрузятся.'; Done = 'обновятся' }
+    'steam-games' = @{ Verb = 'Обновить игры Steam на'; Note = 'Занятые кокпиты пропустятся. Свободные перезагрузятся для обновления игр и возврата защиты.'; Immediate = $true }
     'end-session' = @{ Verb = 'Завершить сеанс на'; Note = 'Запущенная игра закроется. Уже поставленная в очередь команда продолжится после завершения.'; Immediate = $true }
     'minimize-launcher' = @{ Verb = 'Свернуть лаунчер на'; Note = 'Лаунчер свернётся сразу. Текущий сеанс и запущенная игра продолжатся.'; Immediate = $true }
     lock   = @{ Verb = 'Заблокировать'; Now = 'Заблокировать их сразу'; Note = 'Включится защита UWF, компьютеры перезагрузятся. Разблокировать можно только на месте, в панели администратора.'; Done = 'заблокируются' }
@@ -624,6 +632,7 @@ function Start-RemoteCommand([string]$Action) {
         if ([System.Windows.MessageBox]::Show($Window, $question, 'Кокпиты SIMRACE', 'YesNo', $icon) -ne 'Yes') { $selected = @($selected | Where-Object { $lines.ContainsKey($_) }) }
         if ($selected.Count -eq 0) { return }
     }
+    if ($Action -eq 'steam-games') { $selected = @($selected | Sort-Object { $_ -eq $script:AdminComputer }) }
     $started = Start-Query $selected $line $false {
         param($Output)
         $silent = @()
@@ -764,6 +773,7 @@ function Show-VolumePopup($Row, $Anchor) {
 $BtnRefresh.Add_Click({ Start-Refresh })
 $BtnUpdate.Add_Click({ Start-RemoteCommand 'update' })
 $BtnEndSessions.Add_Click({ Start-RemoteCommand 'end-session' })
+$BtnUpdateGames.Add_Click({ Start-RemoteCommand 'steam-games' })
 $BtnMinimizeLaunchers.Add_Click({ Start-RemoteCommand 'minimize-launcher' })
 $BtnLock.Add_Click({ Start-RemoteCommand 'lock' })
 $BtnWake.Add_Click({ Start-Wake })

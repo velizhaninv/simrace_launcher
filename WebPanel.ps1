@@ -319,9 +319,10 @@ function Invoke-Api($Context, [string]$Path) {
             if ($request.HttpMethod -ne 'POST') { return Send-Json $Context @{ ok = $false; error = 'Нужен POST-запрос.' } 405 }
             $body = Read-Body $request
             $action = [string]$body.action
-            if ('update', 'end-session', 'minimize-launcher', 'lock', 'unlock', 'reboot', 'shutdown' -notcontains $action) { return Send-Json $Context @{ ok = $false; error = 'Неизвестная команда.' } 400 }
+            if ('update', 'steam-games', 'end-session', 'minimize-launcher', 'lock', 'unlock', 'reboot', 'shutdown' -notcontains $action) { return Send-Json $Context @{ ok = $false; error = 'Неизвестная команда.' } 400 }
             $names = @($body.names | Where-Object { $script:Names -contains $_ })
             if ($names.Count -eq 0) { return Send-Json $Context @{ ok = $false; error = 'Не выбраны кокпиты.' } 400 }
+            if ($action -eq 'steam-games') { $names = @($names | Sort-Object { $_ -eq $script:AdminComputer }) }
             $lines = @{}
             foreach ($name in @($body.force | Where-Object { $names -contains $_ })) { $lines[$name] = "{`"action`":`"$action`",`"force`":true}" }
             Write-Log "Команда $action с $ip`: $($names -join ', ')"
